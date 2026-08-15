@@ -1,0 +1,26 @@
+name: Backup Database
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Turso CLI
+        run: npm install -g turso
+      - name: Export database
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          turso db shell $TURSO_DATABASE_URL --auth-token $TURSO_AUTH_TOKEN ".dump" > backup.sql
+          gzip backup.sql
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: backup-${{ github.run_id }}
+          files: backup.sql.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
