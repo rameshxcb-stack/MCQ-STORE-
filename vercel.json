@@ -1,23 +1,13 @@
 {
   "functions": {
     "api/**/*.js": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "crons": [
     {
-      "path": "/api/admin/generate-cron",
-      "schedule": "*/5 * * * *",
-      "method": "POST"
-    },
-    {
       "path": "/api/admin/cleanup",
       "schedule": "0 4 * * *",
-      "method": "POST"
-    },
-    {
-      "path": "/api/admin/cleanup-nonces",
-      "schedule": "0 * * * *",
       "method": "POST"
     }
   ]
