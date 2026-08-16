@@ -3,12 +3,5 @@
     "api/**/*.js": {
       "maxDuration": 300
     }
-  },
-  "crons": [
-    {
-      "path": "/api/admin/cleanup",
-      "schedule": "0 4 * * *",
-      "method": "POST"
-    }
-  ]
+  }
 }
