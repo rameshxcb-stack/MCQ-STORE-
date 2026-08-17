@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MCQ Trigger</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="text-align:center; padding:50px; font-family:sans-serif; background:#f4f4f9;">
+  <h2 style="color:#333;">🚀 MCQ Generation Trigger</h2>
+  <p style="color:#666;">Button dabaate hi AI MCQs generate karna shuru kar dega.</p>
+  <button id="genBtn" onclick="triggerGen()" style="padding:15px 40px; font-size:20px; background:#007bff; color:white; border:none; border-radius:8px; cursor:pointer; box-shadow:0 4px 6px rgba(0,0,0,0.1);">▶ Generate Now</button>
+  <p id="status" style="margin-top:20px; color:#555; font-weight:bold;"></p>
+
+  <script>
+    async function triggerGen() {
+      const btn = document.getElementById('genBtn');
+      const status = document.getElementById('status');
+      
+      btn.disabled = true;
+      btn.style.background = "#6c757d";
+      status.innerText = "⏳ Connecting to Vercel backend...";
+      
+      try {
+        const res = await fetch("https://mcq-store-gtp8.vercel.app/api/admin/generate", {
+          method: "POST",
+          headers: { "x-admin-key": "mcq_admin_secure_key_2026_x9k2m4n8" }
+        });
+        const data = await res.json();
+        status.innerText = "✅ Success! " + JSON.stringify(data);
+        btn.style.background = "#28a745";
+      } catch (err) {
+        status.innerText = "❌ Error: " + err.message;
+        btn.style.background = "#dc3545";
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
