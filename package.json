@@ -2,9 +2,17 @@
   "name": "mcq-platform",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch api/admin/generate.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "@libsql/client": "^0.3.0",
-    "cheerio": "^1.0.0"
+    "@libsql/client": "^0.7.0",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.22.4"
   }
 }
-
