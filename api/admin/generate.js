@@ -1,15 +1,15 @@
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 export default async function handler(req, res) {
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-key');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // 🛠️ TURSO DIAGNOSTIC TEST MODE
-  // Test karne ke liye Browser me kholein: /api/admin/generate?test=turso
-  if (req.query?.test === 'turso') {
+  // 1. TURSO DIAGNOSTIC TEST (GET ya POST dono me chalega)
+  if (req.query?.test === 'turso' || req.method === 'GET') {
     const rawUrl = process.env.TURSO_DATABASE_URL || '';
     const rawToken = process.env.TURSO_AUTH_TOKEN || '';
 
@@ -23,8 +23,7 @@ export default async function handler(req, res) {
       tokenLength: cleanToken.length,
       tokenFirst5Chars: cleanToken ? cleanToken.substring(0, 5) : 'NONE',
       tokenLast5Chars: cleanToken ? cleanToken.substring(cleanToken.length - 5) : 'NONE',
-      hasQuotesInToken: rawToken.includes('"') || rawToken.includes("'"),
-      hasBearerInToken: /^Bearer\s+/i.test(rawToken),
+      hasQuotes: rawToken.includes('"') || rawToken.includes("'"),
     };
 
     let connectionResult = 'UNKNOWN';
@@ -34,7 +33,7 @@ export default async function handler(req, res) {
       let mcqModule = await import('../../lib/mcq-generator.js');
       const db = mcqModule.getDb();
       await db.execute("SELECT 1");
-      connectionResult = 'SUCCESS: Database connected properly!';
+      connectionResult = 'SUCCESS: Turso Connected!';
     } catch (err) {
       connectionResult = 'FAILED: Turso rejected connection';
       rawErrorDetails = {
@@ -46,14 +45,14 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
+      status: 'Diagnostic Mode Active',
       environmentDebug: debugInfo,
       connectionTest: connectionResult,
       errorDetails: rawErrorDetails
     });
   }
 
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
+  // 2. NORMAL FLOW FOR POST REQUESTS
   if (ADMIN_KEY && req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
