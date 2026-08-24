@@ -20,14 +20,15 @@ export default async function handler(req, res) {
     const task = tasks[0];
     await db.execute({ sql: `UPDATE generation_tasks SET status = 'in_progress' WHERE id = ?`, args: [task.id] });
 
-    // Placeholder for raw MCQ generation. Replace with your actual generation logic.
-    const rawMCQs = []; 
-    const evidence = "Sample Evidence Text"; 
-
     const result = await generateAndStoreMCQs({
-      subject: task.subject, chapter: task.chapter, rawMCQsInput: rawMCQs, evidenceText: evidence
+      subject: task.subject, 
+      chapter: task.chapter, 
+      rawMCQsInput: [], 
+      evidenceText: "Sample Evidence Text"
     });
 
     return res.status(200).json({ success: true, result });
-  } catch (e) { return res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 }
