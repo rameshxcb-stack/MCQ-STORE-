@@ -1,3 +1,4 @@
+// api/admin/generate.js
 import { createClient } from '@libsql/client';
 import { generateAndStoreMCQs } from '../../lib/mcq-generator.js';
 
@@ -20,11 +21,12 @@ export default async function handler(req, res) {
     const task = tasks[0];
     await db.execute({ sql: `UPDATE generation_tasks SET status = 'in_progress' WHERE id = ?`, args: [task.id] });
 
+    // ✅ Bas ye 2 fields sahi bhejo
     const result = await generateAndStoreMCQs({
-      subject: task.subject, 
-      chapter: task.chapter, 
-      rawMCQsInput: [], 
-      evidenceText: "Sample Evidence Text"
+      subject: task.subject,
+      chapter: task.chapter,
+      rawMCQsInput: [],
+      evidenceText: ""
     });
 
     return res.status(200).json({ success: true, result });
