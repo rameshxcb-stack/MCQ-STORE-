@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MCQ Quiz · Vercel Backend</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+        * { box-sizing: border-box; }
+        :root { --bg-start: #0f2027; --bg-mid1: #2c5364; --bg-mid2: #1c1c1c; --bg-end: #3a0ca3; }
+        body { font-family: 'Poppins', sans-serif; margin: 0; min-height: 100vh; }
+        .animated-bg { background: linear-gradient(-45deg, #0f2027, #1a1a2e, #16213e, #0f3460, #1c1c1c, #2c5364, #3a0ca3); background-size: 400% 400%; animation: gradientMove 12s ease infinite; }
+        @keyframes gradientMove { 0% { background-position: 0% 50%; } 25% { background-position: 50% 0%; } 50% { background-position: 100% 50%; } 75% { background-position: 50% 100%; } 100% { background-position: 0% 50%; } }
+        .glass-card { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25); }
+        .option-card { background: rgba(255, 255, 255, 0.92) !important; color: #111827 !important; border-radius: 14px; cursor: pointer; border: 2px solid transparent; transition: all 0.25s; user-select: none; }
+        .option-card:hover { background: #ffffff !important; transform: translateY(-3px); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.25); border-color: #6366f1; }
+        .option-card.correct-answer { background: #22c55e !important; color: #fff !important; border-color: #16a34a !important; }
+        .option-card.wrong-answer { background: #ef4444 !important; color: #fff !important; border-color: #dc2626 !important; }
+        .option-card.disabled { pointer-events: none; opacity: 0.85; }
+        .timer-danger { animation: timerPulse 0.6s ease infinite; color: #ef4444 !important; }
+        @keyframes timerPulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+        #question { font-family: 'Orbitron', sans-serif; font-size: 19px; letter-spacing: 0.3px; line-height: 1.6; }
+        select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239ca3af' stroke-width='2' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 16px center; background-size: 14px; padding-right: 44px; }
+        select option { background: #1f2937; color: #fff; }
+        @media (max-width: 640px) { #question { font-size: 16px; } .option-card { font-size: 13px; padding: 10px !important; } .glass-card { padding: 12px !important; } }
+    </style>
+</head>
+<body class="animated-bg text-white flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl glass-card p-5 sm:p-6 rounded-2xl relative" id="mainContainer">
+
+        <!-- Subject Selection -->
+        <div id="subjectBox" class="slide-up">
+            <h1 class="text-2xl sm:text-3xl font-bold mb-5 text-center bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">📝 MCQ Quiz · All Exams</h1>
+            <p class="text-center text-gray-300 mb-6 text-sm">Smart Quiz • UPSC · JEE · NEET · SSC · Banking · Jharkhand</p>
+
+            <select id="level1" onchange="loadLevel2()" class="w-full p-3.5 rounded-xl bg-gray-700/70 border border-gray-600 text-white mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-base">
+                <option value="">-- 📂 Category चुनें --</option>
+                <option value="Jharkhand State Exams">🏆 Jharkhand State Exams</option>
+                <option value="General Studies & Civil Services">🏛️ UPSC / State PCS</option>
+                <option value="JEE Physics">⚛️ JEE Physics</option>
+                <option value="JEE Chemistry">🧪 JEE Chemistry</option>
+                <option value="JEE Mathematics">📐 JEE Mathematics</option>
+                <option value="NEET Biology">🧬 NEET Biology</option>
+                <option value="SSC Reasoning">🧠 SSC Reasoning</option>
+                <option value="SSC Quantitative Aptitude">🔢 SSC Quant</option>
+                <option value="SSC English">📖 SSC English</option>
+                <option value="SSC General Awareness">📋 SSC General Awareness</option>
+                <option value="Banking Reasoning">💡 Banking Reasoning</option>
+                <option value="Banking Quantitative Aptitude">📊 Banking Quant</option>
+                <option value="Banking English">📝 Banking English</option>
+                <option value="Banking Awareness">🏦 Banking Awareness</option>
+                <option value="Railway Exams">🚆 Railway Exams</option>
+                <option value="Defense Exams">🛡️ Defense Exams</option>
+                <option value="Teaching & Eligibility Exams">🎓 Teaching Exams</option>
+                <option value="Government Schemes & Policies">🏛️ Govt. Schemes</option>
+                <option value="Other State PCS Exams">🗺️ Other State PCS</option>
+                <option value="Law & Judicial Exams">⚖️ Law Exams</option>
+            </select>
+
+            <select id="level2" onchange="loadLevel3()" class="w-full p-3.5 rounded-xl bg-gray-700/70 border border-gray-600 text-white mb-3 hidden focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-base">
+                <option value="">-- 📑 Section चुनें --</option>
+            </select>
+
+            <select id="level3" onchange="loadChapters()" class="w-full p-3.5 rounded-xl bg-gray-700/70 border border-gray-600 text-white mb-3 hidden focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-base">
+                <option value="">-- 📖 Subject चुनें --</option>
+            </select>
+
+            <select id="chapterSelect" class="w-full p-3.5 rounded-xl bg-gray-700/70 border border-gray-600 text-white mb-4 hidden focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-base font-semibold">
+                <option value="">-- 📄 Chapter चुनें --</option>
+            </select>
+
+            <button id="startBtn" onclick="generateAndStart()" class="w-full p-3.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 transition-all font-bold text-lg hidden">✨ Start Test</button>
+        </div>
+
+        <!-- Quiz Box -->
+        <div id="quizBox" class="hidden slide-up">
+            <div id="serverError" class="server-error">⚠️ <span id="errorMsg"></span></div>
+            <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+                <div class="flex items-center gap-2"><span class="text-lg">⏱</span><span id="time" class="font-bold text-xl font-mono">30</span><span class="text-sm text-gray-400">sec</span></div>
+                <div class="flex items-center gap-2"><span class="text-yellow-400">⭐</span><span class="font-semibold">Score:</span><span id="score" class="font-bold text-xl text-cyan-400">0</span></div>
+                <div class="flex items-center gap-2"><span class="text-gray-400 text-sm">Q:</span><span id="qCounter" class="font-semibold text-sm">1/25</span></div>
+                <div class="flex items-center gap-1">
+                    <button id="bookmarkBtn" onclick="toggleBookmark()" class="bookmark-btn text-2xl transition-all hover:scale-125 text-gray-400" title="Bookmark">🏷️</button>
+                    <button id="explainToggle" onclick="toggleFullExpPopup()" class="text-2xl transition-all hover:scale-125 text-gray-400 explain-toggle-disabled" title="Answer question to view explanation" disabled>👁️</button>
+                </div>
+            </div>
+            <div class="w-full bg-gray-700/60 h-2.5 rounded-full mb-4 overflow-hidden"><div id="progress" class="bg-gradient-to-r from-cyan-500 to-purple-500 h-2.5 rounded-full transition-all duration-500 ease-out" style="width:0%"></div></div>
+            <div class="glass-card p-4 sm:p-5 mb-4"><h2 id="question" class="text-white leading-relaxed"></h2></div>
+            <div id="options" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4"></div>
+            <button onclick="skipCurrent()" class="w-full bg-yellow-600/80 hover:bg-yellow-700 px-5 py-2.5 rounded-xl transition-all mb-3 text-center font-semibold">⏭️ Skip</button>
+            <div class="flex justify-between items-center mt-5 gap-3">
+                <button onclick="goBack()" id="backBtn" class="bg-gray-600/80 hover:bg-gray-600 px-4 py-2.5 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">◀ Back</button>
+                <div class="flex gap-3">
+                    <button onclick="exitQuiz()" class="bg-red-500/80 hover:bg-red-600 px-4 py-2.5 rounded-xl transition-all">🚪 Exit</button>
+                    <button onclick="nextQuestion()" id="nextBtn" class="bg-blue-500/80 hover:bg-blue-600 px-5 py-2.5 rounded-xl transition-all font-semibold">Next ▶</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Box -->
+        <div id="resultBox" class="hidden text-center slide-up">
+            <h2 class="text-2xl sm:text-3xl font-bold mb-4 bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">🏆 Quiz Complete!</h2>
+            <div class="flex justify-center mb-5"><div class="relative w-44 h-44">
+                <svg class="w-full h-full transform -rotate-90"><circle cx="88" cy="88" r="78" stroke="#374151" stroke-width="12" fill="none"/><circle id="scoreCircle" cx="88" cy="88" r="78" stroke="url(#scoreGradient)" stroke-width="12" fill="none" stroke-dasharray="490" stroke-dashoffset="490" stroke-linecap="round"/><defs><linearGradient id="scoreGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00f2fe"/><stop offset="100%" stop-color="#4facfe"/></linearGradient></defs></svg>
+                <div class="absolute inset-0 flex flex-col items-center justify-center"><p class="text-sm text-gray-400">Test Score</p><p id="finalScore" class="text-3xl font-bold text-white"></p><p class="text-xs text-gray-500">out of 100</p></div>
+            </div></div>
+            <div class="grid grid-cols-3 gap-3 mb-4"><div class="bg-gray-700/60 p-3 rounded-xl"><div class="text-2xl">✅</div><div class="text-xs text-gray-400">Correct</div><div id="correct" class="text-xl font-bold text-green-400">0</div></div><div class="bg-gray-700/60 p-3 rounded-xl"><div class="text-2xl">❌</div><div class="text-xs text-gray-400">Incorrect</div><div id="wrong" class="text-xl font-bold text-red-400">0</div></div><div class="bg-gray-700/60 p-3 rounded-xl"><div class="text-2xl">⏭</div><div class="text-xs text-gray-400">Skipped</div><div id="skipped" class="text-xl font-bold text-yellow-400">0</div></div></div>
+            <div class="grid grid-cols-3 gap-3 mb-5"><div class="bg-gray-700/60 p-3 rounded-xl"><div class="text-xs text-gray-400">🏆 Rank</div><div id="rank" class="text-lg font-bold text-cyan-400">-</div></div><div class="bg-gray-700/60 p-3 rounded-xl"><div class="text-xs text-gray-400">🎯 Accuracy</div><div id="accuracy" class="text-lg font-bold text-purple-400">0%</div></div><div class="bg-gray-700/60 p-3 rounded-xl"><div class="text-xs text-gray-400">⏱ Time</div><div id="timeTaken" class="text-lg font-bold text-orange-400">0:00</div></div></div>
+            <div class="mt-4 p-4 bg-gray-700/50 rounded-xl">
+                <h3 class="text-lg font-semibold mb-3 text-gray-200">📋 Question Summary</h3>
+                <div id="reviewGrid" class="grid grid-cols-5 sm:grid-cols-10 gap-2 justify-center"></div>
+            </div>
+            <div class="flex justify-center gap-4 flex-wrap mt-5">
+                <button onclick="retakeWrong()" class="bg-yellow-500/80 hover:bg-yellow-600 px-5 py-3 rounded-xl transition-all font-semibold">🔁 Retry Mistakes</button>
+                <button onclick="retakeSameChapter()" class="bg-green-500/80 hover:bg-green-600 px-5 py-3 rounded-xl transition-all font-semibold">🔄 Try 25 New</button>
+            </div>
+            <button onclick="restartQuiz()" class="bg-blue-500/80 hover:bg-blue-600 px-5 py-3 rounded-xl transition-all font-semibold mt-4">🏠 Home</button>
+        </div>
+    </div>
+    <script src="bundle-fallback.js"></script>
+    <script>
+        // ================================================================
+        //  BACKEND URL (LIVE)
+        // ================================================================
+        const BACKEND_URL = "https://mcq-store.vercel.app";
+
+        // ================================================================
+        //  SECURITY HELPER (Obfuscation)
+        // ================================================================
+        const _enc = (val, uid) => btoa(`q_ans_${val}_${uid}`);
+        const _dec = (str, uid) => {
+            try {
+                const decoded = atob(str);
+                if (!decoded.endsWith(`_${uid}`)) return null;
+                const val = parseInt(decoded.replace('q_ans_', '').replace(`_${uid}`, ''));
+                return (val >= 0 && val <= 3) ? val : null;
+            } catch(e) { return null; }
+        };
+
+        // ================================================================
+        //  STATE VARIABLES
+        // ================================================================
+        let questions = [], current = 0, score = 0, timeLeft = 30, timer = null, userAnswers = [];
+        let bookmarked = new Set(), isQuizActive = false, quizStartTime = 0;
+        let currentChapter = "", isSubmitting = false, sessionToken = "", userId = "";
+
+        // ================================================================
+        //  ✅ COMPLETE HIERARCHY DATA (Jharkhand + All Exams)
+        // ================================================================
+        const hierarchyData = {
+            // 🏆 JHARKHAND STATE EXAMS (TOP PRIORITY)
+            "Jharkhand State Exams": {
+                "JPSC (Jharkhand Public Service Commission)": {
+                    "JPSC Civil Services (Prelims)": ["History of Jharkhand", "Jharkhand Movement", "CNTA & SPTA Acts", "Geography of Jharkhand", "Economy & Mining", "Polity & Governance", "Welfare Schemes", "Current Affairs"],
+                    "JPSC Civil Services (Mains)": ["Paper 1: General Hindi & English", "Paper 2: Regional Language", "Paper 3: History & Geography", "Paper 4: Polity & Administration", "Paper 5: Economy & Development", "Paper 6: Science & Environment"],
+                    "JPSC Judicial Services": ["Constitution & High Court", "BNS / IPC & CrPC", "CPC & Evidence Act", "Local Land Laws"],
+                    "JPSC Assistant Engineer (Technical)": ["General Studies & Jharkhand GK", "Civil/Mechanical/Electrical Specialization"]
+                },
+                "JSSC (Jharkhand Staff Selection Commission)": {
+                    "JSSC CGL (Graduate Level)": ["Paper 1: Language", "Paper 2: Regional Language", "Paper 3: GS, Jharkhand GK, Science, Maths, Reasoning & Computer"],
+                    "JSSC Excise Constable & Special Branch": ["Language Test", "Regional Language", "General GK & Maths", "Physical Test"],
+                    "JSSC Diploma / JE": ["General Engineering", "Jharkhand GK", "Basic Computer & Reasoning"],
+                    "JSSC Inter & Stenographer": ["Jharkhand GK", "Hindi Typing & Stenography", "Maths & Reasoning"],
+                    "JSSC Industrial Instructors": ["Trade Knowledge", "Jharkhand GK", "Basic Science & Maths"]
+                },
+                "Jharkhand Police & Security Forces": {
+                    "Police Constable": ["Regional Language", "Hindi & GK", "Physical Test"],
+                    "Sub-Inspector (SI) & Sergeant": ["Language Qualifying", "Regional Language", "GS, Jharkhand GK, Science, Maths & Computer", "Criminal Laws"],
+                    "JAP, IRB & Home Guard": ["Local GK", "Basic Arithmetic", "Physical Endurance"]
+                },
+                "Jharkhand Teachers & Education": {
+                    "JTET": ["Child Development & Pedagogy", "Language 1 & 2", "Maths & EVS", "Science & Social Studies"],
+                    "JSSC Assistant Teacher": ["Mother Tongue", "Regional Language", "GK & Pedagogy", "Subject Specialization"],
+                    "PGT / TGT Teachers": ["GK & General Hindi", "Main Subject (Physics, Chem, Math, Bio, History, Geo)"]
+                },
+                "Jharkhand Revenue, Forest & Agriculture": {
+                    "Revenue Officer & Amin": ["Land Rules & Survey", "CNTA/SPTA", "Jharkhand History & Welfare", "Computer Data Entry"],
+                    "Forest Guard & Ranger": ["Forest Laws", "Flora & Fauna", "Science & Fitness"],
+                    "Agriculture & Dairy Extension": ["Crops & Soil", "Irrigation Schemes", "PM-KISAN & Schemes"]
+                },
+                "Jharkhand Health & Medical Services": {
+                    "CHO & Medical Officers": ["Anatomy & Physiology", "Community Health", "NHM Schemes", "First Aid"],
+                    "ANM, GNM & Pharmacist": ["Nursing & Midwifery", "Rural Health", "Basic Medical Sciences"]
+                }
+            },
+            // 🏛️ UPSC / GENERAL STUDIES
+            "General Studies & Civil Services": {
+                "History": { "Ancient India": ["Mauryan Empire", "Gupta Empire"], "Medieval India": ["Mughal Empire", "Delhi Sultanate"], "Modern India": ["1857 Revolt", "Freedom Struggle"] },
+                "Art & Culture": { "Architecture": ["Indus Valley", "Temples"], "Performing Arts": ["Dances", "Music"], "Literature": ["Vedic", "Sangam"] },
+                "Geography": { "Physical Geography": ["Rivers", "Mountains"], "Indian Geography": ["States", "Climate"], "World Geography": ["Continents", "Oceans"] },
+                "Polity & Governance": { "Constitution": ["Fundamental Rights", "DPSP"], "Governance": ["Parliament", "Judiciary"] },
+                "Economy": { "Macroeconomics": ["GDP", "Inflation"], "Indian Economy": ["Planning", "Sectors"] },
+                "Science & Technology": { "Physics": ["Mechanics", "Optics"], "Chemistry": ["Bonding", "Thermodynamics"], "Biology": ["Cell", "Genetics"] },
+                "Environment & Ecology": { "Ecology": ["Ecosystems", "Biodiversity"], "Climate Change": ["Global Warming", "Pollution"], "Laws": ["Wildlife Act", "Forest Act"] },
+                "Ethics & Aptitude": { "Moral Philosophy": ["Theories", "Applied Ethics"], "Integrity": ["Values", "Accountability"] },
+                "Internal Security & IR": { "Security": ["Naxalism", "Cyber Security"], "IR": ["Neighborhood", "Global Groupings"] },
+                "Indian Society": { "Social Structure": ["Diversity", "Women"], "Poverty": ["Urbanization", "Secularism"] },
+                "UPSC CSAT": { "Aptitude": ["Comprehension", "Reasoning", "Numeracy"] },
+                "Current Affairs": { "National": ["Politics", "Schemes"], "International": ["Summits", "Bilateral Ties"], "Sports": ["Cricket", "Olympics"] }
+            },
+            // ⚛️ JEE / ENGINEERING
+            "JEE Physics": {
+                "Class 11 Physics": { "Mechanics": ["Units & Measurements", "Kinematics", "Laws of Motion", "Work Energy", "Gravitation"], "Thermodynamics": ["Heat", "Laws of Thermodynamics"], "Waves": ["Oscillations", "Sound"] },
+                "Class 12 Physics": { "Electromagnetism": ["Electrostatics", "Current", "Magnetism", "EMI"], "Optics": ["Ray Optics", "Wave Optics"], "Modern Physics": ["Atoms", "Nuclei", "Semiconductors"] }
+            },
+            "JEE Chemistry": {
+                "Physical Chemistry": { "Basics": ["Mole Concept", "Atomic Structure"], "Core": ["Bonding", "Thermodynamics", "Equilibrium"], "Advanced": ["Electrochemistry", "Kinetics"] },
+                "Inorganic Chemistry": { "Elements": ["Periodic Table", "s-block", "p-block"], "Compounds": ["Coordination", "Qualitative"] },
+                "Organic Chemistry": { "Basics": ["GOC", "Hydrocarbons"], "Functional Groups": ["Halogens", "Alcohols", "Aldehydes", "Acids", "Amines"], "Bio & Polymers": ["Biomolecules", "Polymers"] }
+            },
+            "JEE Mathematics": {
+                "Algebra": ["Sets", "Complex", "Quadratic", "Matrices", "Binomial", "Series"],
+                "Calculus": ["Limits", "Differentiation", "Applications", "Integration", "Differential Equations"],
+                "Geometry": ["Lines", "Circles", "Conics", "3D", "Vectors"],
+                "Stats & Trigonometry": ["Probability", "Trigonometric Functions", "Inverse Trigonometry"]
+            },
+            // 🧬 NEET / MEDICAL
+            "NEET Biology": {
+                "Botany": { "Plant Diversity": ["Classification", "Plant Kingdom", "Morphology"], "Plant Physiology": ["Transport", "Photosynthesis", "Respiration"], "Reproduction": ["Sexual Reproduction", "Embryology"] },
+                "Zoology": { "Animal Diversity": ["Animal Kingdom", "Structural Org"], "Human Physiology": ["Digestion", "Circulation", "Excretory", "Neural"], "Human Reproduction": ["Reproductive Health", "Embryology"] },
+                "Genetics & Evolution": { "Principles": ["Inheritance", "Molecular Basis"], "Evolution": ["Origin", "Natural Selection"] },
+                "Applied Biology": { "Health & Disease": ["Immunity", "AIDS", "Cancer"], "Biotech": ["Principles", "Recombinant DNA"] },
+                "Ecology": { "Environment": ["Organisms", "Ecosystem", "Biodiversity"] }
+            },
+            // 📋 SSC
+            "SSC Reasoning": { "Verbal": ["Analogy", "Series", "Coding"], "Non-Verbal": ["Mirror", "Paper Folding"], "Logical": ["Syllogism", "Venn"] },
+            "SSC Quantitative Aptitude": { "Arithmetic": ["Number System", "Percentage", "Profit Loss", "Time Work", "Speed"], "Advanced": ["Algebra", "Geometry", "Trigonometry", "DI"] },
+            "SSC English": { "Grammar": ["Tenses", "Voice", "Narration"], "Vocabulary": ["Synonyms", "Idioms"], "Comprehension": ["RC", "Cloze"] },
+            "SSC General Awareness": { "Static GK": ["History", "Geography", "Polity"], "Current": ["National", "International", "Awards"] },
+            // 🏦 BANKING
+            "Banking Reasoning": { "Puzzles": ["Seating", "Floor"], "Logical": ["Syllogism", "Inequality"] },
+            "Banking Quantitative Aptitude": { "Arithmetic": ["Simplification", "Interest", "Data Analysis"], "Data Interpretation": ["Tabular", "Graphs"] },
+            "Banking English": { "RC & Writing": ["Reading Comprehension", "Essay"], "Grammar & Vocab": ["Error Detection", "Fill in the Blanks"] },
+            "Banking Awareness": { "Banking": ["RBI", "Monetary Policy", "Types of Banks"], "Financial": ["Stock Market", "SEBI", "Insurance"], "Current": ["Banking News", "Mergers"] },
+            // 🚆 RAILWAY
+            "Railway Exams": {
+                "RRB NTPC": { "Mathematics": ["Number System", "Algebra", "Geometry", "Stats"], "General Intelligence": ["Series", "Coding", "Syllogism"], "General Awareness": ["Current Events", "Science", "Polity"] },
+                "RRB Group D": { "General Science": ["Physics", "Chemistry", "Biology"], "Mathematics": ["Basic Maths"], "General Intelligence": ["Analogies", "Series"] },
+                "RRB ALP & Technician": { "CBT 1 & 2": ["Basic Science & Engineering", "Engineering Drawing"], "General Aptitude": ["Maths", "Reasoning"] }
+            },
+            // 🛡️ DEFENSE
+            "Defense Exams": {
+                "NDA & NA": { "Mathematics": ["Algebra", "Calculus", "Geometry"], "General Ability Test": ["English", "Physics", "History", "Geography"] },
+                "CDS": { "English": ["Comprehension", "Grammar"], "General Knowledge": ["Polity", "History", "Geography"], "Elementary Maths": ["Arithmetic", "Algebra"] }
+            },
+            // 🎓 TEACHING
+            "Teaching & Eligibility Exams": {
+                "CTET Paper 1": { "CDP": ["Piaget", "Vygotsky"], "Language I & II": ["Pedagogy"], "Maths & EVS": ["Maths", "EVS"] },
+                "CTET Paper 2": { "CDP": ["Learning", "Motivation"], "Maths & Science": ["Maths", "Science"], "Social Studies": ["SS"] }
+            },
+            // 🏛️ GOVERNMENT SCHEMES
+            "Government Schemes & Policies": {
+                "National Schemes": { "PM Yojana": ["PM Kisan", "PM Awas", "PM Ujjwala"], "Central Welfare": ["Ayushman Bharat", "NEP 2020"] },
+                "State Schemes (Jharkhand)": { "Mukhyamantri Yojana": ["Maiya Samman", "Abua Awas"], "Agriculture & Welfare": ["Birsa Harit", "Pension"] }
+            },
+            // 🗺️ OTHER STATE PCS
+            "Other State PCS Exams": {
+                "UPPSC": { "Prelims": ["GS", "UP Special GK"], "Mains": ["History", "Geography"] },
+                "MPPSC": { "Prelims": ["GS", "MP Special GK"], "Mains": ["History", "Economy"] },
+                "BPSC": { "Prelims": ["Bihar GK", "GS"], "Mains": ["History", "Economy"] }
+            },
+            // ⚖️ LAW
+            "Law & Judicial Exams": {
+                "CLAT & AILET": { "Legal Aptitude": ["Constitution", "IPC", "Contract"], "English & GK": ["Comprehension", "Current Affairs"] },
+                "State Judiciary": { "Civil & Criminal Law": ["CPC", "CrPC", "IPC", "Evidence"], "Personal Law": ["Hindu Law", "Muslim Law"] }
+            }
+        };
+
+        // ================================================================
+        //  DROPDOWN LOGIC
+        // ================================================================
+        function loadLevel2() {
+            const cat = document.getElementById("level1").value;
+            const l2 = document.getElementById("level2");
+            const l3 = document.getElementById("level3");
+            const ch = document.getElementById("chapterSelect");
+            const btn = document.getElementById("startBtn");
+            l2.classList.add("hidden"); l3.classList.add("hidden"); ch.classList.add("hidden"); btn.classList.add("hidden");
+            if (!cat) return;
+            const sections = hierarchyData[cat];
+            l2.innerHTML = '<option value="">-- 📑 Section चुनें --</option>' + Object.keys(sections).map(s => `<option>${s}</option>`).join('');
+            l2.classList.remove("hidden");
+        }
+        function loadLevel3() {
+            const cat = document.getElementById("level1").value;
+            const sec = document.getElementById("level2").value;
+            const l3 = document.getElementById("level3");
+            const ch = document.getElementById("chapterSelect");
+            const btn = document.getElementById("startBtn");
+            l3.classList.add("hidden"); ch.classList.add("hidden"); btn.classList.add("hidden");
+            if (!cat || !sec) return;
+            const subjects = hierarchyData[cat][sec];
+            l3.innerHTML = '<option value="">-- 📖 Subject चुनें --</option>' + Object.keys(subjects).map(s => `<option>${s}</option>`).join('');
+            l3.classList.remove("hidden");
+        }
+        function loadChapters() {
+            const cat = document.getElementById("level1").value;
+            const sec = document.getElementById("level2").value;
+            const sub = document.getElementById("level3").value;
+            const ch = document.getElementById("chapterSelect");
+            const btn = document.getElementById("startBtn");
+            ch.classList.add("hidden"); btn.classList.add("hidden");
+            if (!cat || !sec || !sub) return;
+            const chapters = hierarchyData[cat][sec][sub];
+            ch.innerHTML = '<option value="">-- 📄 Chapter चुनें --</option>' + chapters.map(c => `<option value="${c}">${c}</option>`).join('');
+            ch.classList.remove("hidden");
+            ch.onchange = () => { if (ch.value) btn.classList.remove("hidden"); else btn.classList.add("hidden"); };
+        }
+
+        // ================================================================
+        //  TOKEN HANDLING
+        // ================================================================
+        async function getSessionTokenFromBackend() {
+            if (sessionToken) return sessionToken;
+            try {
+                const resp = await fetch(`${BACKEND_URL}/api/session-token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: userId }) });
+                const data = await resp.json();
+                if (resp.ok && data.token) { sessionToken = data.token; userId = data.userId; return sessionToken; }
+                else throw new Error('Failed to get session token');
+            } catch (e) { console.error('Token fetch error:', e); return null; }
+        }
+
+        // ================================================================
+        //  QUIZ START (Hybrid API + jsDelivr Fallback)
+        // ================================================================
+        async function generateAndStart() {
+            const rawChapter = document.getElementById("chapterSelect").value;
+            if (!rawChapter) return;
+            currentChapter = rawChapter.trim().toLowerCase();
+            userId = localStorage.getItem("mcq_uid") || "usr_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem("mcq_uid", userId);
+            showLoading("Fetching MCQs…");
+
+            let mcqsData = null;
+            try {
+                const token = await getSessionTokenFromBackend();
+                const bundleResp = await fetch(`${BACKEND_URL}/api/bundle/${encodeURIComponent(currentChapter)}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!bundleResp.ok) throw new Error(`API ${bundleResp.status}`);
+                mcqsData = await bundleResp.json();
+                console.log("✅ Loaded from Vercel API");
+            } catch (apiError) {
+                console.warn("⚠️ API failed. Falling back to jsDelivr...", apiError.message);
+                mcqsData = await window.loadChapterFallback(currentChapter);
+                if (!mcqsData) {
+                    document.getElementById("serverError").style.display = "block";
+                    document.getElementById("errorMsg").innerText = `Chapter "${currentChapter}" unavailable.`;
+                    hideLoading(); return;
+                }
+                console.log("✅ Loaded from GitHub (Fallback)");
+            }
+
+            if (!mcqsData || mcqsData.length === 0) throw new Error("Empty data");
+            questions = mcqsData.map((q, idx) => ({
+                id: q.id || `Q${idx+1}_${Date.now()}`,
+                q: q.q,
+                options: q.options || [],
+                _ansKey: _enc(parseInt(q.answer), userId),
+                exp: q.exp || ""
+            }));
+            hideLoading(); startQuiz();
+        }
+
+        // ================================================================
+        //  LOAD QUESTION LOGIC
+        // ================================================================
+        function startQuiz() {
+            current = 0; score = 0;
+            userAnswers = new Array(questions.length).fill(null);
+            bookmarked.clear();
+            document.getElementById("score").innerText = 0;
+            document.getElementById("subjectBox").classList.add("hidden");
+            document.getElementById("resultBox").classList.add("hidden");
+            document.getElementById("quizBox").classList.remove("hidden");
+            isQuizActive = true;
+            quizStartTime = Date.now();
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            clearInterval(timer);
+            if (current >= questions.length) return submitQuiz();
+            const q = questions[current];
+            const realAnswerIndex = _dec(q._ansKey, userId);
+            if (realAnswerIndex === null) { console.error("Security Error: Answer key tampered. Skipping question."); userAnswers[current] = -1; nextQuestion(); return; }
+            document.getElementById("question").innerText = `Q${current+1}: ${q.q}`;
+            document.getElementById("qCounter").innerText = `${current+1}/${questions.length}`;
+            document.getElementById("progress").style.width = ((current+1)/questions.length*100)+"%";
+            document.getElementById("backBtn").disabled = (current === 0);
+            const optDiv = document.getElementById("options");
+            optDiv.innerHTML = "";
+            q.options.forEach((opt, i) => {
+                const card = document.createElement("div");
+                card.className = `option-card p-3 sm:p-4 rounded-xl text-center ${userAnswers[current]!=null ? 'disabled' : ''}`;
+                card.setAttribute("data-index", i);
+                card.onclick = () => selectOption(i);
+                card.innerHTML = `<span class="font-semibold mr-1.5 text-gray-500">${String.fromCharCode(65+i)}.</span> ${opt}`;
+                optDiv.appendChild(card);
+            });
+            if (userAnswers[current] != null) {
+                const cards = optDiv.children;
+                if (cards[realAnswerIndex]) cards[realAnswerIndex].classList.add('correct-answer');
+                if (userAnswers[current] >= 0 && userAnswers[current] !== realAnswerIndex && cards[userAnswers[current]]) cards[userAnswers[current]].classList.add('wrong-answer');
+            }
+            if (userAnswers[current] == null) {
+                timeLeft = 30;
+                document.getElementById("time").innerText = timeLeft;
+                timer = setInterval(() => {
+                    timeLeft--;
+                    document.getElementById("time").innerText = timeLeft;
+                    if (timeLeft <= 8) document.getElementById("time").classList.add("timer-danger");
+                    if (timeLeft <= 0) { clearInterval(timer); if (userAnswers[current] == null) userAnswers[current] = -1; nextQuestion(); }
+                }, 1000);
+            } else {
+                document.getElementById("time").innerText = "✓";
+            }
+        }
+
+        function selectOption(i) {
+            if (userAnswers[current] != null) return;
+            clearInterval(timer);
+            const realAnswerIndex = _dec(questions[current]._ansKey, userId);
+            if (realAnswerIndex === null) return;
+            userAnswers[current] = i;
+            const cards = document.querySelectorAll("#options .option-card");
+            cards.forEach(c => c.classList.add("disabled"));
+            if (i === realAnswerIndex) { cards[i].classList.add("correct-answer"); score++; document.getElementById("score").innerText = score; }
+            else { cards[i].classList.add("wrong-answer"); if (cards[realAnswerIndex]) cards[realAnswerIndex].classList.add("correct-answer"); }
+        }
+
+        function skipCurrent() { if (userAnswers[current] == null) { userAnswers[current] = -1; clearInterval(timer); nextQuestion(); } }
+        function nextQuestion() { clearInterval(timer); if (userAnswers[current] == null) userAnswers[current] = -1; if (current < questions.length - 1) { current++; loadQuestion(); } else submitQuiz(); }
+        function goBack() { clearInterval(timer); if (current > 0) { current--; loadQuestion(); } }
+
+        function toggleBookmark() {
+            const q = questions[current];
+            bookmarked.has(q.q) ? bookmarked.delete(q.q) : bookmarked.add(q.q);
+            const bmBtn = document.getElementById("bookmarkBtn");
+            bmBtn.classList.toggle("bookmarked", bookmarked.has(q.q));
+            bmBtn.textContent = bookmarked.has(q.q) ? "🔖" : "🏷️";
+        }
+
+        function showLoading(msg) { document.getElementById("loadingMsg").innerText = msg; document.getElementById("loadingOverlay").classList.remove("hidden"); }
+        function hideLoading() { document.getElementById("loadingOverlay").classList.add("hidden"); }
+
+        function toggleFullExpPopup() { if (userAnswers[current] == null) { alert("Please answer first."); return; } const box = document.getElementById("fullExpBox"); box.classList.toggle("hidden"); }
+
+        // ================================================================
+        //  SUBMIT & RESULT
+        // ================================================================
+        async function submitQuiz() {
+            if (isSubmitting) return;
+            isSubmitting = true;
+            showLoading("Submitting answers...");
+            const payload = { userId, token: sessionToken, chapter: currentChapter, answers: userAnswers.map(a => a === -1 || a === null ? -1 : a) };
+            try { await fetch(`${BACKEND_URL}/api/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); } catch (e) { console.warn("Submit failed:", e); }
+            hideLoading();
+            isSubmitting = false;
+            renderResult();
+        }
+
+        function renderResult() {
+            clearInterval(timer);
+            isQuizActive = false;
+            document.getElementById("quizBox").classList.add("hidden");
+            document.getElementById("resultBox").classList.remove("hidden");
+
+            const totalQ = questions.length;
+            const attempted = userAnswers.filter(a => a !== null && a >= 0).length;
+            const correct = score, incorrect = attempted - correct, skipped = userAnswers.filter(a => a === -1 || a === null).length;
+            document.getElementById("correct").innerText = correct;
+            document.getElementById("wrong").innerText = incorrect;
+            document.getElementById("skipped").innerText = skipped;
+            const accuracy = attempted === 0 ? 0 : Math.round((correct/attempted)*100);
+            document.getElementById("accuracy").innerText = accuracy+"%";
+            const elapsed = Math.floor((Date.now()-quizStartTime)/1000);
+            document.getElementById("timeTaken").innerText = `${Math.floor(elapsed/60)}:${(elapsed%60).toString().padStart(2,'0')}`;
+            const finalScore = Math.min(100, Math.round((Math.max(0, correct - incorrect*0.33)/totalQ)*100));
+            document.getElementById("finalScore").innerText = finalScore;
+
+            let rank = "—";
+            if (finalScore >= 90) rank = "🌟 Genius";
+            else if (finalScore >= 75) rank = "🏅 Excellent";
+            else if (finalScore >= 60) rank = "⭐ Good";
+            else if (finalScore >= 40) rank = "📘 Average";
+            else rank = "📚 Needs Practice";
+            document.getElementById("rank").innerText = rank;
+
+            const reviewGrid = document.getElementById("reviewGrid");
+            reviewGrid.innerHTML = "";
+            userAnswers.forEach((ans, idx) => {
+                const realAnswerIndex = _dec(questions[idx]._ansKey, userId);
+                const div = document.createElement("div");
+                div.className = "review-dot";
+                if (realAnswerIndex === null) { div.classList.add("unattempted"); div.textContent = "?"; }
+                else if (ans === realAnswerIndex) { div.classList.add("correct"); div.textContent = "✓"; }
+                else if (ans === -1 || ans === null) { div.classList.add("skipped"); div.textContent = "•"; }
+                else { div.classList.add("wrong"); div.textContent = "✗"; }
+                reviewGrid.appendChild(div);
+            });
+            if (finalScore >= 60) { /* Confetti animation code here */ }
+        }
+
+        function restartQuiz() {
+            clearInterval(timer);
+            document.getElementById("quizBox").classList.add("hidden");
+            document.getElementById("resultBox").classList.add("hidden");
+            document.getElementById("subjectBox").classList.remove("hidden");
+            document.getElementById("level1").value = "";
+            loadLevel2();
+        }
+        function exitQuiz() { document.getElementById("quizBox").classList.add("hidden"); document.getElementById("subjectBox").classList.remove("hidden"); }
+        console.log("MCQ Quiz initialized with backend:", BACKEND_URL);
+    </script>
+</body>
+</html>
