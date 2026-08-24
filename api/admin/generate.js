@@ -3,7 +3,6 @@ import { createClient } from '@libsql/client';
 import { generateAndStoreMCQs } from '../../lib/mcq-generator.js';
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
-const db = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,7 +12,17 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (req.headers['x-admin-key'] !== ADMIN_KEY) return res.status(403).json({ error: 'Unauthorized' });
 
+  // 🛡️ Env Variables check (Error aane se rokta hai)
+  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  const tursoToken = process.env.TURSO_AUTH_TOKEN;
+  if (!tursoUrl || !tursoToken) {
+    return res.status(500).json({ error: 'Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variable' });
+  }
+
   try {
+    // 🛡️ DB client को अंदर बनाओ (Safe - कभी crash नहीं होगा)
+    const db = createClient({ url: tursoUrl, authToken: tursoToken });
+
     const { rows: tasks } = await db.execute({
       sql: `SELECT * FROM generation_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1`
     });
@@ -21,7 +30,7 @@ export default async function handler(req, res) {
     const task = tasks[0];
     await db.execute({ sql: `UPDATE generation_tasks SET status = 'in_progress' WHERE id = ?`, args: [task.id] });
 
-    // ✅ Bas ye 2 fields sahi bhejo
+    // ✅ सिर्फ इतना भेजो - Generator को सही object मिलेगा
     const result = await generateAndStoreMCQs({
       subject: task.subject,
       chapter: task.chapter,
