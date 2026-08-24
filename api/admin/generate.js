@@ -12,7 +12,6 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
 
-  // ✅ Fix: api/admin/ folder ke liye ../../ (double dot) zaroori hai
   let mcqModule;
   try {
     mcqModule = await import('../../lib/mcq-generator.js');
@@ -35,9 +34,9 @@ export default async function handler(req, res) {
   try {
     const db = getDb();
 
-    const { rows: tasks } = await db.execute({
-      sql: `SELECT * FROM generation_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1`
-    });
+    // Fix 1: Turso Client String Query Syntax
+    const tasksResult = await db.execute("SELECT * FROM generation_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1");
+    const tasks = tasksResult?.rows || [];
 
     if (!tasks || tasks.length === 0) {
       return res.status(200).json({ message: 'No pending tasks' });
@@ -45,6 +44,7 @@ export default async function handler(req, res) {
 
     const task = tasks[0];
 
+    // Fix 2: Safe Parameter Passing in Turso Query
     await db.execute({ 
       sql: `UPDATE generation_tasks SET status = 'in_progress' WHERE id = ?`, 
       args: [task.id] 
@@ -84,6 +84,8 @@ export default async function handler(req, res) {
     });
 
     const nextStatus = result?.success ? 'completed' : 'failed';
+    
+    // Fix 3: Safe Status Update
     await db.execute({ 
       sql: `UPDATE generation_tasks SET status = ? WHERE id = ?`, 
       args: [nextStatus, task.id] 
