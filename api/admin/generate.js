@@ -1,5 +1,3 @@
-import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../lib/mcq-generator.js';
-
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 export default async function handler(req, res) {
@@ -9,10 +7,23 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  
+
   if (ADMIN_KEY && req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
+
+  // ✅ Fix: api/admin/ folder ke liye ../../ (double dot) zaroori hai
+  let mcqModule;
+  try {
+    mcqModule = await import('../../lib/mcq-generator.js');
+  } catch (importErr) {
+    return res.status(500).json({
+      error: 'Failed to import lib/mcq-generator.js module from api/admin/',
+      details: importErr.message
+    });
+  }
+
+  const { generateAndStoreMCQs, retrieveEvidence, getDb } = mcqModule;
 
   const tursoUrl = process.env.TURSO_DATABASE_URL;
   const tursoToken = process.env.TURSO_AUTH_TOKEN;
@@ -45,7 +56,6 @@ export default async function handler(req, res) {
     if (mcqData) {
       try {
         const parsed = typeof mcqData === 'string' ? JSON.parse(mcqData) : mcqData;
-        
         if (parsed && Array.isArray(parsed)) {
           rawMCQs = parsed;
         } else if (parsed && typeof parsed === 'object') {
@@ -83,7 +93,6 @@ export default async function handler(req, res) {
 
   } catch (e) {
     console.error('❌ Task Execution Error:', e);
-    // Stack trace exact debug karne ke liye output karega
     return res.status(500).json({ 
       error: e?.message || 'Internal server error',
       stack: e?.stack || 'No stack trace available'
