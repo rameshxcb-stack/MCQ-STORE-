@@ -43,12 +43,17 @@ export default async function handler(req, res) {
 
     if (mcqData) {
       try {
-        rawMCQs = typeof mcqData === 'string' ? JSON.parse(mcqData) : mcqData;
-        if (!Array.isArray(rawMCQs) && typeof rawMCQs === 'object') {
-          rawMCQs = rawMCQs.mcqs || rawMCQs.questions || [rawMCQs];
+        const parsed = typeof mcqData === 'string' ? JSON.parse(mcqData) : mcqData;
+        
+        // SAFE NULL & OBJECT CHECK (Fixes "Cannot convert undefined or null to object")
+        if (parsed && Array.isArray(parsed)) {
+          rawMCQs = parsed;
+        } else if (parsed && typeof parsed === 'object') {
+          rawMCQs = parsed.mcqs || parsed.questions || [parsed];
         }
       } catch (err) {
         console.warn('⚠️ Could not parse JSON from task payload:', err.message);
+        rawMCQs = [];
       }
     }
 
@@ -62,13 +67,13 @@ export default async function handler(req, res) {
     }
 
     const result = await generateAndStoreMCQs({
-      subject: task.subject,
-      chapter: task.chapter,
-      rawMCQsInput: rawMCQs,
+      subject: task.subject || '',
+      chapter: task.chapter || '',
+      rawMCQsInput: Array.isArray(rawMCQs) ? rawMCQs : [],
       evidenceText: evidenceText
     });
 
-    const nextStatus = result.success ? 'completed' : 'failed';
+    const nextStatus = result?.success ? 'completed' : 'failed';
     await db.execute({ 
       sql: `UPDATE generation_tasks SET status = ? WHERE id = ?`, 
       args: [nextStatus, task.id] 
@@ -78,6 +83,6 @@ export default async function handler(req, res) {
 
   } catch (e) {
     console.error('❌ Task Execution Error:', e);
-    return res.status(500).json({ error: e.message || 'Internal server error' });
+    return res.status(500).json({ error: e?.message || 'Internal server error' });
   }
 }
