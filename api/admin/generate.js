@@ -7,17 +7,48 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // 🛠️ EXACT ENV DEBUG TEST CHECK
-  // Reqbin ya Browser me GET/POST me URL par "?test=env" bhej kar check karein
-  if (req.query?.test === 'env') {
+  // 🛠️ TURSO DIAGNOSTIC TEST MODE
+  // Test karne ke liye Browser me kholein: /api/admin/generate?test=turso
+  if (req.query?.test === 'turso') {
+    const rawUrl = process.env.TURSO_DATABASE_URL || '';
+    const rawToken = process.env.TURSO_AUTH_TOKEN || '';
+
+    const cleanUrl = rawUrl.trim().replace(/^["']|["']$/g, '');
+    const cleanToken = rawToken.trim().replace(/^["']|["']$/g, '').replace(/^Bearer\s+/i, '');
+
+    const debugInfo = {
+      urlPresent: Boolean(cleanUrl),
+      urlPrefix: cleanUrl ? cleanUrl.substring(0, 15) + '...' : 'NONE',
+      tokenPresent: Boolean(cleanToken),
+      tokenLength: cleanToken.length,
+      tokenFirst5Chars: cleanToken ? cleanToken.substring(0, 5) : 'NONE',
+      tokenLast5Chars: cleanToken ? cleanToken.substring(cleanToken.length - 5) : 'NONE',
+      hasQuotesInToken: rawToken.includes('"') || rawToken.includes("'"),
+      hasBearerInToken: /^Bearer\s+/i.test(rawToken),
+    };
+
+    let connectionResult = 'UNKNOWN';
+    let rawErrorDetails = null;
+
+    try {
+      let mcqModule = await import('../../lib/mcq-generator.js');
+      const db = mcqModule.getDb();
+      await db.execute("SELECT 1");
+      connectionResult = 'SUCCESS: Database connected properly!';
+    } catch (err) {
+      connectionResult = 'FAILED: Turso rejected connection';
+      rawErrorDetails = {
+        name: err.name,
+        message: err.message,
+        statusCode: err.status || err.statusCode || 401,
+        fullError: String(err)
+      };
+    }
+
     return res.status(200).json({
-      hasTursoUrl: Boolean(process.env.TURSO_DATABASE_URL),
-      tursoUrlPrefix: process.env.TURSO_DATABASE_URL?.substring(0, 10),
-      hasTursoToken: Boolean(process.env.TURSO_AUTH_TOKEN),
-      tokenLength: process.env.TURSO_AUTH_TOKEN?.length || 0,
-      hasGeminiKeys: Boolean(process.env.GEMINI_KEYS),
-      hasDeepseekKeys: Boolean(process.env.DEEPSEEK_KEYS),
-      hasAdminKey: Boolean(process.env.ADMIN_API_KEY)
+      environmentDebug: debugInfo,
+      connectionTest: connectionResult,
+      errorDetails: rawErrorDetails
     });
   }
 
@@ -25,16 +56,6 @@ export default async function handler(req, res) {
 
   if (ADMIN_KEY && req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Unauthorized' });
-  }
-
-  const tursoUrl = process.env.TURSO_DATABASE_URL?.trim();
-  const tursoToken = process.env.TURSO_AUTH_TOKEN?.trim();
-
-  if (!tursoUrl || !tursoToken) {
-    return res.status(500).json({ 
-      error: 'Turso Env Error', 
-      details: `URL missing: ${!tursoUrl}, Token missing: ${!tursoToken}` 
-    });
   }
 
   let mcqModule;
@@ -78,7 +99,7 @@ export default async function handler(req, res) {
           rawMCQs = parsed.mcqs || parsed.questions || [parsed];
         }
       } catch (err) {
-        console.warn('⚠️ Could not parse JSON from task payload:', err.message);
+        console.warn('⚠️ Could not parse JSON payload:', err.message);
         rawMCQs = [];
       }
     }
