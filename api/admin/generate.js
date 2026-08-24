@@ -1,4 +1,4 @@
-import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../../lib/mcq-generator.js';
+import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../lib/mcq-generator.js';
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
@@ -9,6 +9,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  
   if (ADMIN_KEY && req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
@@ -39,13 +40,12 @@ export default async function handler(req, res) {
     });
 
     let rawMCQs = [];
-    const mcqData = task.raw_mcqs || task.payload || task.raw_data;
+    const mcqData = task ? (task.raw_mcqs || task.payload || task.raw_data) : null;
 
     if (mcqData) {
       try {
         const parsed = typeof mcqData === 'string' ? JSON.parse(mcqData) : mcqData;
         
-        // SAFE NULL & OBJECT CHECK (Fixes "Cannot convert undefined or null to object")
         if (parsed && Array.isArray(parsed)) {
           rawMCQs = parsed;
         } else if (parsed && typeof parsed === 'object') {
@@ -57,8 +57,8 @@ export default async function handler(req, res) {
       }
     }
 
-    let evidenceText = task.evidence || '';
-    if (!evidenceText && task.subject && task.chapter) {
+    let evidenceText = task?.evidence || '';
+    if (!evidenceText && task?.subject && task?.chapter) {
       try {
         evidenceText = await retrieveEvidence(task.subject, task.chapter);
       } catch (e) {
@@ -67,10 +67,10 @@ export default async function handler(req, res) {
     }
 
     const result = await generateAndStoreMCQs({
-      subject: task.subject || '',
-      chapter: task.chapter || '',
+      subject: task?.subject || '',
+      chapter: task?.chapter || '',
       rawMCQsInput: Array.isArray(rawMCQs) ? rawMCQs : [],
-      evidenceText: evidenceText
+      evidenceText: evidenceText || ''
     });
 
     const nextStatus = result?.success ? 'completed' : 'failed';
@@ -83,6 +83,10 @@ export default async function handler(req, res) {
 
   } catch (e) {
     console.error('❌ Task Execution Error:', e);
-    return res.status(500).json({ error: e?.message || 'Internal server error' });
+    // Stack trace exact debug karne ke liye output karega
+    return res.status(500).json({ 
+      error: e?.message || 'Internal server error',
+      stack: e?.stack || 'No stack trace available'
+    });
   }
 }
