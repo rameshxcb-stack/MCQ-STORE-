@@ -1,55 +1,76 @@
-export default async function handler(req, res) {
-  const dbUrl = process.env.TURSO_DATABASE_URL || "";
-  const authToken = process.env.TURSO_AUTH_TOKEN || "";
+import { getDb } from '../../lib/db.js';
 
-  // Standardize HTTPS URL for raw HTTP check
-  const httpUrl = dbUrl.replace("libsql://", "https://");
+export default async function handler(req, res) {
+  const currentUrl = process.env.TURSO_DATABASE_URL || '';
+  const currentToken = process.env.TURSO_AUTH_TOKEN || '';
+
+  // 1. Extract Database Name from standard Turso URL (e.g. libsql://db-name-org.turso.io)
+  let extractedDbName = 'UNKNOWN';
+  if (currentUrl) {
+    const match = currentUrl.match(/libsql:\/\/([^.]+)/);
+    if (match && match[1]) {
+      extractedDbName = match[1];
+    }
+  }
+
+  // 2. Extract Key ID / Issuer info safely from JWT Token payload without external libraries
+  let tokenInfo = { issuer: 'UNKNOWN', keyId: 'UNKNOWN', error: null };
+  if (currentToken) {
+    try {
+      const parts = currentToken.split('.');
+      if (parts.length === 3) {
+        const headerJson = JSON.parse(Buffer.from(parts[0], 'base64').toString('utf-8'));
+        const payloadJson = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+        
+        tokenInfo = {
+          keyId: headerJson.kid || 'No Key ID (kid)',
+          issuer: payloadJson.iss || payloadJson.sub || 'Unknown Issuer',
+          expiresAt: payloadJson.exp ? new Date(payloadJson.exp * 1000).toISOString() : 'No Expiry'
+        };
+      }
+    } catch (e) {
+      tokenInfo.error = 'Token is not a valid JWT structure';
+    }
+  }
+
+  // Terminal Console Logs
+  console.log('--- 🔍 LIVE TURSO INSPECTOR ---');
+  console.log('🔗 Loaded URL:', currentUrl);
+  console.log('🗄️ Database Name:', extractedDbName);
+  console.log('🔑 Token Key ID (kid):', tokenInfo.keyId);
+  console.log('--------------------------------');
 
   try {
-    // 1. Test URL Accessibility (Without Token)
-    const urlCheck = await fetch(`${httpUrl}/version`).catch((err) => ({
-      error: err.message,
-    }));
-
-    // 2. Test Authorization (With Token)
-    const authCheck = await fetch(`${httpUrl}/v2/pipeline`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ requests: [{ type: "execute", stmt: { sql: "SELECT 1" } }] }),
-    });
-
-    const authStatus = authCheck.status;
-    const authResponseBody = await authCheck.text();
-
-    // 3. Exact Diagnostic Verdict Logic
-    let exactErrorCause = "UNKNOWN";
-
-    if (urlCheck.error || (urlCheck.status && urlCheck.status === 404)) {
-      exactErrorCause = "DB_URL_IS_WRONG (Database host name exist nahi karta ya invalid URL hai)";
-    } else if (authStatus === 401) {
-      exactErrorCause = "TOKEN_IS_WRONG (URL sahi hai par Token is specific DB ke sath match nahi ho raha ya invalid hai)";
-    } else if (authStatus === 200) {
-      exactErrorCause = "NONE (Everything is 100% Correct and Connected!)";
-    } else {
-      exactErrorCause = `OTHER_ISSUE (HTTP Status: ${authStatus})`;
-    }
+    const db = getDb();
+    // Try pinging to check token validity against the loaded database URL
+    await db.execute('SELECT 1;');
 
     return res.status(200).json({
-      EXACT_DIAGNOSTIC_VERDICT: exactErrorCause,
-      details: {
-        urlStatus: urlCheck.status || urlCheck.error,
-        tokenAuthHttpStatus: authStatus,
-        tursoRawResponse: authResponseBody,
-        testedUrl: dbUrl,
-      },
+      status: 'SUCCESS',
+      message: 'Database connection verified! URL aur Token exact match ho rahe hain.',
+      database_details: {
+        database_url_used: currentUrl,
+        database_name_from_url: extractedDbName,
+        token_prefix: currentToken ? `${currentToken.substring(0, 15)}...` : 'MISSING',
+        token_length: currentToken.length,
+        token_internal_info: tokenInfo
+      }
     });
+
   } catch (err) {
     return res.status(500).json({
-      EXACT_DIAGNOSTIC_VERDICT: "CRITICAL_SCRIPT_ERROR",
-      error: err.message,
+      status: 'FAILED',
+      EXACT_DIAGNOSTIC_VERDICT: err.message.includes('invalid JWT token') || err.message.includes('401')
+        ? 'TOKEN_DATABASE_MISMATCH (Token invalid hai ya kisi DUSRE database ka active hai)'
+        : 'CONNECTION_ERROR',
+      database_details: {
+        database_url_used: currentUrl,
+        database_name_from_url: extractedDbName,
+        token_prefix: currentToken ? `${currentToken.substring(0, 15)}...` : 'MISSING',
+        token_length: currentToken.length,
+        token_internal_info: tokenInfo,
+        raw_error: err.message
+      }
     });
   }
 }
