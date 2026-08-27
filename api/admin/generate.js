@@ -1,19 +1,33 @@
 export default async function handler(req, res) {
+  // Response type always JSON set karein
   res.setHeader('Content-Type', 'application/json');
 
-  const TURSO_URL = "https://mcq-rameshxcb-stack.aws-ap-south-1.turso.io/v2/pipeline";
-  const TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODc4Mzk0NjIsImlkIjoiMDFhMDA5NTgtMWQwMS03YzQ4LWI2ZDktMmI4OGQwMDgyNTY1Iiwia2lkIjoiQ185cDN0WVAzRW1yb2xaa2hvUGlMWDNaeHVxSWxROUU4dGJLQXp5a1lEdyIsInJpZCI6ImY0M2VhNzc1LTNkMjYtNDZhMi05NmY4LThlNzRiM2NlNDJlZiJ9.zYjrmW6GuqmXB-qdf4UZTeByXvrf9lNznUB7EC-ooYHI22XwA-ty1vR0EqXHr8wseS1dTnOQntr911lnQ4S0Bg";
+  // Vercel Environment Variables Read karein
+  const rawUrl = process.env.TURSO_DATABASE_URL || '';
+  const token = process.env.TURSO_AUTH_TOKEN || '';
+
+  // Safe Environment Variables Check
+  if (!rawUrl || !token) {
+    return res.status(400).json({
+      status: 'MISSING_ENV',
+      message: 'Vercel Environment Variables (TURSO_DATABASE_URL ya TURSO_AUTH_TOKEN) nahi mile.'
+    });
+  }
+
+  // libsql:// ko https:// me convert karke pipeline endpoint tayar karein
+  const endpoint = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '') + '/v2/pipeline';
 
   try {
-    const response = await fetch(TURSO_URL, {
+    // Direct HTTP Pipeline Fetch Request
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${TURSO_TOKEN}`,
+        'Authorization': `Bearer ${token.trim()}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         requests: [
-          { type: "execute", stmt: { sql: "SELECT 1 as connection_test;" } },
+          { type: "execute", stmt: { sql: "SELECT 1 as test;" } },
           { type: "close" }
         ]
       })
@@ -22,15 +36,16 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (response.ok) {
+      // Direct success response pass karein
       return res.status(200).json({
         status: 'SUCCESS',
-        message: '🎉 VERCEL & TURSO CONNECTED PERFECTLY!',
-        data: data.results[0]?.response?.result || data
+        message: 'Database query executed successfully!',
+        result: data.results[0]?.response?.result || data
       });
     } else {
       return res.status(response.status).json({
-        status: 'FAILED',
-        http_code: response.status,
+        status: 'DATABASE_ERROR',
+        http_status: response.status,
         turso_error: data
       });
     }
