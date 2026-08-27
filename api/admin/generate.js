@@ -1,75 +1,65 @@
 import { getDb } from '../../lib/db.js';
 
 export default async function handler(req, res) {
-  const currentUrl = process.env.TURSO_DATABASE_URL || '';
-  const currentToken = process.env.TURSO_AUTH_TOKEN || '';
-
-  // 1. Extract Database Name from standard Turso URL (e.g. libsql://db-name-org.turso.io)
-  let extractedDbName = 'UNKNOWN';
-  if (currentUrl) {
-    const match = currentUrl.match(/libsql:\/\/([^.]+)/);
-    if (match && match[1]) {
-      extractedDbName = match[1];
-    }
-  }
-
-  // 2. Extract Key ID / Issuer info safely from JWT Token payload without external libraries
-  let tokenInfo = { issuer: 'UNKNOWN', keyId: 'UNKNOWN', error: null };
-  if (currentToken) {
-    try {
-      const parts = currentToken.split('.');
-      if (parts.length === 3) {
-        const headerJson = JSON.parse(Buffer.from(parts[0], 'base64').toString('utf-8'));
-        const payloadJson = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-        
-        tokenInfo = {
-          keyId: headerJson.kid || 'No Key ID (kid)',
-          issuer: payloadJson.iss || payloadJson.sub || 'Unknown Issuer',
-          expiresAt: payloadJson.exp ? new Date(payloadJson.exp * 1000).toISOString() : 'No Expiry'
-        };
-      }
-    } catch (e) {
-      tokenInfo.error = 'Token is not a valid JWT structure';
-    }
-  }
-
-  // Terminal Console Logs
-  console.log('--- 🔍 LIVE TURSO INSPECTOR ---');
-  console.log('🔗 Loaded URL:', currentUrl);
-  console.log('🗄️ Database Name:', extractedDbName);
-  console.log('🔑 Token Key ID (kid):', tokenInfo.keyId);
-  console.log('--------------------------------');
+  // Always return JSON, prevent HTML 500 crashes
+  res.setHeader('Content-Type', 'application/json');
 
   try {
+    const currentUrl = process.env.TURSO_DATABASE_URL || '';
+    const currentToken = process.env.TURSO_AUTH_TOKEN || '';
+
+    // Extract Database Name from URL safely
+    let extractedDbName = 'NOT_CONFIGURED';
+    if (currentUrl) {
+      const match = currentUrl.match(/libsql:\/\/([^.]+)/);
+      if (match && match[1]) {
+        extractedDbName = match[1];
+      }
+    }
+
+    // Direct Verification Steps
+    if (!currentUrl || !currentToken) {
+      return res.status(200).json({
+        status: 'ENV_VARIABLES_MISSING',
+        EXACT_DIAGNOSTIC_VERDICT: 'Vercel Environment variables properly load nahi hue hain.',
+        details: {
+          has_url: !!currentUrl,
+          has_token: !!currentToken
+        }
+      });
+    }
+
+    // Try DB Execution
     const db = getDb();
-    // Try pinging to check token validity against the loaded database URL
     await db.execute('SELECT 1;');
 
     return res.status(200).json({
       status: 'SUCCESS',
-      message: 'Database connection verified! URL aur Token exact match ho rahe hain.',
-      database_details: {
-        database_url_used: currentUrl,
-        database_name_from_url: extractedDbName,
-        token_prefix: currentToken ? `${currentToken.substring(0, 15)}...` : 'MISSING',
-        token_length: currentToken.length,
-        token_internal_info: tokenInfo
+      message: '✅ Database Connection & Auth Token Verified Successfully!',
+      details: {
+        database_url: currentUrl,
+        database_name: extractedDbName,
+        token_length: currentToken.length
       }
     });
 
   } catch (err) {
-    return res.status(500).json({
-      status: 'FAILED',
-      EXACT_DIAGNOSTIC_VERDICT: err.message.includes('invalid JWT token') || err.message.includes('401')
-        ? 'TOKEN_DATABASE_MISMATCH (Token invalid hai ya kisi DUSRE database ka active hai)'
-        : 'CONNECTION_ERROR',
-      database_details: {
-        database_url_used: currentUrl,
-        database_name_from_url: extractedDbName,
-        token_prefix: currentToken ? `${currentToken.substring(0, 15)}...` : 'MISSING',
-        token_length: currentToken.length,
-        token_internal_info: tokenInfo,
-        raw_error: err.message
+    const errorMsg = err?.message || String(err);
+    
+    let failureReason = 'UNKNOWN_DATABASE_ERROR';
+    if (errorMsg.includes('invalid JWT token') || errorMsg.includes('401') || errorMsg.includes('can\'t be decoded')) {
+      failureReason = 'TOKEN_MISMATCH (Vercel mein TURSO_AUTH_TOKEN galat ya dusre DB ka pada hai)';
+    } else if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('fetch failed')) {
+      failureReason = 'INVALID_URL (TURSO_DATABASE_URL reach nahi ho raha hai)';
+    }
+
+    return res.status(200).json({
+      status: 'DATABASE_ERROR',
+      EXACT_DIAGNOSTIC_VERDICT: failureReason,
+      error_message: errorMsg,
+      details: {
+        database_url_used: process.env.TURSO_DATABASE_URL || 'MISSING',
+        token_length: process.env.TURSO_AUTH_TOKEN ? process.env.TURSO_AUTH_TOKEN.length : 0
       }
     });
   }
