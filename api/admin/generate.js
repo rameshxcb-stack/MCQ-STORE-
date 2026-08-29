@@ -1,4 +1,4 @@
-// api/admin/generate.js - ✅ Fully Updated Dual-Action with Proper Admin Key Scoping
+// api/admin/generate.js - ✅ Token Sanitization Removed (Only trim())
 
 import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../../lib/mcq-generator.js';
 
@@ -16,38 +16,39 @@ const QUERY_REGISTRY = {
     sql: 'SELECT * FROM mcqs WHERE chapter = ? ORDER BY RANDOM() LIMIT 25;',
     args: ['chapter']
   },
-  // ➕ Aap apni additional SQL queries yahan add kar sakte hain...
 };
 
 // ============================================================
 // 🔧 MAIN HANDLER
 // ============================================================
 export default async function handler(req, res) {
-  // CORS Headers
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-key');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ status: 'ERROR', error: 'METHOD_NOT_ALLOWED', message: 'Only POST requests allowed.' });
   }
 
-  // Turso Environment Variables Check
+  // Environment Variables – सिर्फ trim() करें, बाकी कुछ नहीं
   let rawUrl = process.env.TURSO_DATABASE_URL || '';
   let rawToken = process.env.TURSO_AUTH_TOKEN || '';
 
-  if (!rawUrl || !rawToken) {
+  // ✅ Token को बिना किसी Regex के सीधा Use करें – बस Leading/Trailing Space हटाएँ
+  const cleanToken = rawToken.trim();
+  const cleanUrl = rawUrl.trim().replace('libsql://', 'https://').replace(/\/$/, '');
+
+  if (!cleanUrl || !cleanToken) {
     return res.status(500).json({
       status: 'ERROR',
       error: 'MISSING_CREDENTIALS',
       message: 'Vercel Environment Variables (TURSO_DATABASE_URL / TURSO_AUTH_TOKEN) set nahi hain.'
     });
   }
+
+  const endpoint = `${cleanUrl}/v2/pipeline`;
 
   // Parse Body
   const bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
@@ -79,10 +80,6 @@ export default async function handler(req, res) {
       });
     }
 
-    const cleanToken = rawToken.replace(/["'\s\r\n]/g, '').trim();
-    const cleanUrl = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '');
-    const endpoint = `${cleanUrl}/v2/pipeline`;
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8500);
 
@@ -90,7 +87,7 @@ export default async function handler(req, res) {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${cleanToken}`,
+          'Authorization': `Bearer ${cleanToken}`,  // ✅ Raw Token, बिना किसी Modification के
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -137,7 +134,6 @@ export default async function handler(req, res) {
   // ⚙️ ACTION 2: TASK PROCESSOR (Background AI Generation)
   // ============================================================
   if (action === 'processTask') {
-    // ✅ Admin Key Check – ONLY HERE (Public queries are not blocked)
     const reqAdminKey = req.headers['x-admin-key'] || req.headers['authorization']?.replace(/^Bearer\s+/i, '');
 
     if (!ADMIN_KEY || reqAdminKey !== ADMIN_KEY) {
@@ -151,7 +147,6 @@ export default async function handler(req, res) {
     try {
       const db = getDb();
 
-      // 1. Fetch Pending Task
       const { rows: tasks } = await db.execute({
         sql: `SELECT * FROM generation_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1`
       });
@@ -162,13 +157,11 @@ export default async function handler(req, res) {
 
       const task = tasks[0];
 
-      // 2. Mark Task as In Progress
       await db.execute({
         sql: `UPDATE generation_tasks SET status = 'in_progress' WHERE id = ?`,
         args: [task.id]
       });
 
-      // 3. Parse MCQ Raw Payload
       let rawMCQs = [];
       const mcqData = task.raw_mcqs || task.payload || task.raw_data;
 
@@ -183,7 +176,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // 4. Scrape Evidence if not present
       let evidenceText = task.evidence || '';
       if (!evidenceText && task.subject && task.chapter) {
         try {
@@ -193,7 +185,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // 5. Dual AI Verification & DB Insertion
       const result = await generateAndStoreMCQs({
         subject: task.subject,
         chapter: task.chapter,
@@ -201,7 +192,6 @@ export default async function handler(req, res) {
         evidenceText: evidenceText
       });
 
-      // 6. Update Final Task Status
       const nextStatus = result.success ? 'completed' : 'failed';
       await db.execute({
         sql: `UPDATE generation_tasks SET status = ? WHERE id = ?`,
@@ -216,7 +206,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // Default Error Fallback
   return res.status(400).json({
     status: 'ERROR',
     error: 'INVALID_ACTION',
