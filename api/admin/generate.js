@@ -1,42 +1,24 @@
-// api/admin/generate.js - ✅ Ultimate Secure Version (SQL Injection Proof)
+// api/admin/generate.js - ✅ Robust Fallback Added
 
-// 🛡️ 1. Query Registry (सभी अनुमत Queries यहाँ Hardcoded हैं)
 const QUERY_REGISTRY = {
-  // Connection Test Query (बिना पैरामीटर)
   'check_connection': {
     sql: 'SELECT 1 as is_active;',
     args: []
   },
-  
-  // उदाहरण: ID से User ढूंढना (पैरामीटर के साथ)
-  'get_user': {
-    sql: 'SELECT * FROM users WHERE id = ?;',
-    args: ['userId']
-  },
-  
-  // उदाहरण: Active Users
-  'get_active_users': {
-    sql: 'SELECT * FROM users WHERE active = ?;',
-    args: ['status']
-  }
-  
-  // ➕ आप अपनी ज़रूरत की और Queries यहाँ जोड़ सकते हैं
-  // 'your_query_name': { sql: 'SELECT ...', args: ['param1', 'param2'] }
+  // अपनी और Queries यहाँ जोड़ें...
 };
 
 export default async function handler(req, res) {
-  // CORS Headers
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // Handle CORS Preflight (OPTIONS request)
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // 1. Environment Variables पढ़ें (ये Vercel Dashboard में सेव हैं)
+  // Environment Variables
   let rawUrl = process.env.TURSO_DATABASE_URL || '';
   let rawToken = process.env.TURSO_AUTH_TOKEN || '';
 
@@ -44,33 +26,42 @@ export default async function handler(req, res) {
     return res.status(400).json({
       status: 'ERROR',
       error: 'MISSING_CREDENTIALS',
-      message: 'Vercel Environment Variables (TURSO_DATABASE_URL / TURSO_AUTH_TOKEN) set nahi hain.'
+      message: 'Vercel Environment Variables set nahi hain.'
     });
   }
 
-  // 2. Vercel Runtime Quirk Fix (Hidden Characters हटाएँ)
   const cleanToken = rawToken.replace(/["'\s\r\n]/g, '').trim();
   const cleanUrl = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '');
   const endpoint = `${cleanUrl}/v2/pipeline`;
 
-  // 3. 🛡️ Client से सिर्फ queryType और args लें (SQL नहीं!)
-  const { queryType, args = [] } = req.body || {};
+  // ✅ Robust Body Parsing + Multiple Key Support (आपका दिया हुआ Solution)
+  const bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  
+  // ✅ यहाँ queryType, query, type – तीनों को Support करता है
+  const queryType = bodyData.queryType || bodyData.query || bodyData.type || 'check_connection';
+  const args = bodyData.args || [];
 
-  // 4. 🛡️ Whitelist Check – क्या यह Query Registry में है?
+  // अगर queryType अभी भी empty है, तो error दें
+  if (!queryType) {
+    return res.status(400).json({
+      status: 'ERROR',
+      error: 'MISSING_QUERY_TYPE',
+      message: 'Payload mein queryType, query, ya type key bhejna zaroori hai.'
+    });
+  }
+
   const queryConfig = QUERY_REGISTRY[queryType];
   if (!queryConfig) {
     return res.status(403).json({
       status: 'ERROR',
       error: 'INVALID_QUERY',
-      message: `Query type "${queryType}" allowed nahi hai.`
+      message: `Query type "${queryType}" allowed nahi hai. Available: ${Object.keys(QUERY_REGISTRY).join(', ')}`
     });
   }
 
-  // 5. Registry से Hardcoded SQL लें
   const queryToExecute = queryConfig.sql;
   const expectedArgNames = queryConfig.args;
 
-  // 6. सुनिश्चित करें कि Args की संख्या सही है
   if (args.length !== expectedArgNames.length) {
     return res.status(400).json({
       status: 'ERROR',
@@ -79,7 +70,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // 7. Timeout Handle (8.5 सेकंड)
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8500);
 
@@ -92,13 +82,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         requests: [
-          { 
-            type: "execute", 
-            stmt: { 
-              sql: queryToExecute, 
-              args: args  // Turso इसे सुरक्षित (Parameterized) तरीके से Handle करेगा
-            } 
-          },
+          { type: "execute", stmt: { sql: queryToExecute, args: args } },
           { type: "close" }
         ]
       }),
@@ -106,7 +90,6 @@ export default async function handler(req, res) {
     });
 
     clearTimeout(timeoutId);
-
     const data = await response.json();
 
     if (response.ok) {
