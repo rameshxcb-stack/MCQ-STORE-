@@ -1,4 +1,4 @@
-// api/admin/generate.js - ✅ Token Sanitization Removed (Only trim())
+// api/admin/generate.js - ✅ Safe and Simple
 
 import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../../lib/mcq-generator.js';
 
@@ -33,14 +33,10 @@ export default async function handler(req, res) {
   }
 
   // Environment Variables – सिर्फ trim() करें, बाकी कुछ नहीं
-  let rawUrl = process.env.TURSO_DATABASE_URL || '';
-  let rawToken = process.env.TURSO_AUTH_TOKEN || '';
+  const rawUrl = (process.env.TURSO_DATABASE_URL || '').trim();
+  const rawToken = (process.env.TURSO_AUTH_TOKEN || '').trim();
 
-  // ✅ Token को बिना किसी Regex के सीधा Use करें – बस Leading/Trailing Space हटाएँ
-  const cleanToken = rawToken.trim();
-  const cleanUrl = rawUrl.trim().replace('libsql://', 'https://').replace(/\/$/, '');
-
-  if (!cleanUrl || !cleanToken) {
+  if (!rawUrl || !rawToken) {
     return res.status(500).json({
       status: 'ERROR',
       error: 'MISSING_CREDENTIALS',
@@ -48,10 +44,19 @@ export default async function handler(req, res) {
     });
   }
 
+  const cleanUrl = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '');
   const endpoint = `${cleanUrl}/v2/pipeline`;
 
-  // Parse Body
-  const bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  // ============================================================
+  // 🛡️ Safe Body Parsing
+  // ============================================================
+  let bodyData = {};
+  try {
+    bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  } catch (e) {
+    return res.status(400).json({ status: 'ERROR', error: 'INVALID_JSON', message: 'Invalid JSON in request body.' });
+  }
+
   const { action, queryType, args = [] } = bodyData;
 
   // ============================================================
@@ -65,18 +70,18 @@ export default async function handler(req, res) {
       return res.status(403).json({
         status: 'ERROR',
         error: 'INVALID_QUERY',
-        message: `Query type "${finalQueryType}" allowed nahi hai. Available: ${Object.keys(QUERY_REGISTRY).join(', ')}`
+        message: `Query type "${finalQueryType}" is not allowed.`
       });
     }
 
     const queryToExecute = queryConfig.sql;
     const expectedArgNames = queryConfig.args;
 
-    if (args.length !== expectedArgNames.length) {
+    if (!Array.isArray(args) || args.length !== expectedArgNames.length) {
       return res.status(400).json({
         status: 'ERROR',
         error: 'INVALID_ARGS',
-        message: `${expectedArgNames.length} argument(s) chahiye, par ${args.length} mile.`
+        message: `Expected ${expectedArgNames.length} argument(s) but received ${args.length}.`
       });
     }
 
@@ -87,7 +92,7 @@ export default async function handler(req, res) {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${cleanToken}`,  // ✅ Raw Token, बिना किसी Modification के
+          'Authorization': `Bearer ${rawToken}`,  // ✅ Raw Token – कोई Regex नहीं
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -105,7 +110,7 @@ export default async function handler(req, res) {
       if (response.ok) {
         return res.status(200).json({
           status: 'SUCCESS',
-          message: '✅ Query execute ho gayi!',
+          message: '✅ Query executed successfully!',
           data: data.results?.[0]?.response?.result || data
         });
       } else {
