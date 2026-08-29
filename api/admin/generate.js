@@ -1,8 +1,8 @@
 // api/admin/generate.js
 // ============================================================
-// ✅ Production-Ready Vercel + Turso Admin Task Processor
-// Architecture unchanged:
-// Vercel API → generation_tasks → MCQ Generator → Turso
+// Vercel + Turso
+// Production Architecture Preserved
+// DEBUG VERSION: Exact DB errors returned to ReqBin
 // ============================================================
 
 import {
@@ -14,32 +14,32 @@ import {
 import { randomUUID } from 'crypto';
 
 // ============================================================
-// 🔐 CONFIGURATION
+// CONFIG
 // ============================================================
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 const MAX_RETRY_ATTEMPTS = 3;
-
-// Database lease only.
-// This does NOT increase Vercel function execution timeout.
-const TASK_LEASE_TIMEOUT_SECONDS = 120;
-
-// Retry: 30s → 60s → 120s
+const TASK_LEASE_TIMEOUT_SECONDS = 180;
 const RETRY_DELAY_SECONDS = 30;
 
 // ============================================================
-// 📌 QUERY REGISTRY
-// Admin-only predefined SQL.
-// No arbitrary SQL is accepted from client.
+// QUERY REGISTRY
 // ============================================================
 
 const QUERY_REGISTRY = {
+
+  // ----------------------------------------------------------
+  // DATABASE CONNECTION TEST
+  // ----------------------------------------------------------
   check_connection: {
     sql: 'SELECT 1 AS is_active;',
     args: []
   },
 
+  // ----------------------------------------------------------
+  // MCQ QUERY
+  // ----------------------------------------------------------
   get_mcqs_by_chapter: {
     sql: `
       SELECT
@@ -62,86 +62,40 @@ const QUERY_REGISTRY = {
     `,
     args: ['subject', 'chapter']
   }
+
 };
 
 // ============================================================
-// 🔧 HELPERS
-// ============================================================
-
-function safeErrorMessage(error) {
-  if (!error) return 'Unknown error';
-
-  if (typeof error === 'string') {
-    return error.slice(0, 500);
-  }
-
-  return String(error.message || error)
-    .replace(/\s+/g, ' ')
-    .slice(0, 500);
-}
-
-function parseTaskMCQs(value) {
-  if (!value) return [];
-
-  try {
-    const parsed =
-      typeof value === 'string'
-        ? JSON.parse(value)
-        : value;
-
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-
-    if (parsed && typeof parsed === 'object') {
-      if (Array.isArray(parsed.mcqs)) {
-        return parsed.mcqs;
-      }
-
-      if (Array.isArray(parsed.questions)) {
-        return parsed.questions;
-      }
-
-      return [parsed];
-    }
-
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-function getRetryDelaySeconds(attemptNumber) {
-  // attempt 1 → 30s
-  // attempt 2 → 60s
-  // attempt 3 → 120s
-  return RETRY_DELAY_SECONDS * Math.pow(2, Math.max(0, attemptNumber - 1));
-}
-
-// ============================================================
-// 🚀 MAIN HANDLER
+// MAIN HANDLER
 // ============================================================
 
 export default async function handler(req, res) {
+
   const requestId = randomUUID().slice(0, 8);
-  const startedAt = Date.now();
+  const startTime = Date.now();
+
+  // ----------------------------------------------------------
+  // Structured logger
+  // ----------------------------------------------------------
 
   const log = (level, message, meta = {}) => {
+
     console.log(
       JSON.stringify({
         timestamp: new Date().toISOString(),
         requestId,
         level,
         message,
-        durationMs: Date.now() - startedAt,
+        durationMs: Date.now() - startTime,
         ...meta
       })
     );
+
   };
 
-  // ==========================================================
-  // 🌐 RESPONSE HEADERS
-  // ==========================================================
+  // ----------------------------------------------------------
+  // CORS / RESPONSE HEADERS
+  // ----------------------------------------------------------
 
   res.setHeader('Content-Type', 'application/json');
 
@@ -160,42 +114,97 @@ export default async function handler(req, res) {
     'Content-Type, Authorization, x-admin-key'
   );
 
-  // ==========================================================
+  // ----------------------------------------------------------
   // OPTIONS
-  // ==========================================================
+  // ----------------------------------------------------------
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // ==========================================================
-  // METHOD
-  // ==========================================================
+  // ----------------------------------------------------------
+  // METHOD CHECK
+  // ----------------------------------------------------------
 
   if (req.method !== 'POST') {
+
     return res.status(405).json({
       status: 'ERROR',
       error: 'METHOD_NOT_ALLOWED',
-      message: 'Only POST requests are allowed.'
+      message: 'Only POST requests are allowed.',
+      requestId
     });
+
   }
 
   // ==========================================================
-  // ENVIRONMENT CHECK
+  // ENVIRONMENT VARIABLES
   // ==========================================================
 
-  const rawUrl = (process.env.TURSO_DATABASE_URL || '').trim();
-  const rawToken = (process.env.TURSO_AUTH_TOKEN || '').trim();
+  const rawUrl =
+    (process.env.TURSO_DATABASE_URL || '').trim();
+
+  const rawToken =
+    (process.env.TURSO_AUTH_TOKEN || '').trim();
+
+  // ----------------------------------------------------------
+  // Credential existence check
+  // ----------------------------------------------------------
 
   if (!rawUrl || !rawToken) {
-    log('error', 'Turso environment variables missing');
+
+    log(
+      'error',
+      'Missing Turso environment variables',
+      {
+        hasDatabaseUrl: Boolean(rawUrl),
+        hasDatabaseToken: Boolean(rawToken)
+      }
+    );
 
     return res.status(500).json({
+
       status: 'ERROR',
+
       error: 'MISSING_CREDENTIALS',
-      message: 'Database environment variables are not configured.'
+
+      connected: false,
+
+      message:
+        'TURSO_DATABASE_URL or TURSO_AUTH_TOKEN is missing in Vercel Environment Variables.',
+
+      diagnostics: {
+        hasDatabaseUrl: Boolean(rawUrl),
+        hasDatabaseToken: Boolean(rawToken)
+      },
+
+      requestId
+
     });
+
   }
+
+  // ==========================================================
+  // TOKEN SANITIZATION
+  // ==========================================================
+
+  const cleanToken =
+    rawToken
+      .replace(/^Bearer\s+/i, '')
+      .replace(/["'\s\r\n]/g, '')
+      .trim();
+
+  // ==========================================================
+  // URL SANITIZATION
+  // ==========================================================
+
+  const cleanUrl =
+    rawUrl
+      .replace(/^libsql:\/\//i, 'https://')
+      .replace(/\/$/, '');
+
+  const endpoint =
+    `${cleanUrl}/v2/pipeline`;
 
   // ==========================================================
   // BODY PARSING
@@ -204,21 +213,31 @@ export default async function handler(req, res) {
   let bodyData = {};
 
   try {
+
     bodyData =
       typeof req.body === 'string'
         ? JSON.parse(req.body)
         : (req.body || {});
+
   } catch (error) {
-    log('error', 'Invalid JSON body', {
-      error: safeErrorMessage(error)
-    });
 
     return res.status(400).json({
+
       status: 'ERROR',
+
       error: 'INVALID_JSON',
-      message: 'Invalid JSON request body.'
+
+      message: 'Invalid JSON request body.',
+
+      requestId
+
     });
+
   }
+
+  // ==========================================================
+  // REQUEST DATA
+  // ==========================================================
 
   const {
     action,
@@ -227,305 +246,500 @@ export default async function handler(req, res) {
   } = bodyData;
 
   // ==========================================================
-  // 🔐 ADMIN AUTHENTICATION
-  // ALL ACTIONS REQUIRE ADMIN KEY
+  // ADMIN AUTHENTICATION
   // ==========================================================
 
   const authorizationHeader =
     req.headers['authorization'];
 
-  const bearerKey =
-    typeof authorizationHeader === 'string'
-      ? authorizationHeader.replace(/^Bearer\s+/i, '').trim()
-      : '';
-
-  const headerAdminKey =
-    typeof req.headers['x-admin-key'] === 'string'
-      ? req.headers['x-admin-key'].trim()
-      : '';
+  const adminHeader =
+    req.headers['x-admin-key'];
 
   const reqAdminKey =
-    headerAdminKey || bearerKey;
+    adminHeader ||
+    authorizationHeader?.replace(
+      /^Bearer\s+/i,
+      ''
+    );
 
-  if (!ADMIN_KEY || reqAdminKey !== ADMIN_KEY) {
-    log('warn', 'Unauthorized admin request', {
-      action
-    });
+  if (
+    !ADMIN_KEY ||
+    reqAdminKey !== ADMIN_KEY
+  ) {
+
+    log(
+      'warn',
+      'Unauthorized request',
+      {
+        action
+      }
+    );
 
     return res.status(403).json({
+
       status: 'ERROR',
+
       error: 'UNAUTHORIZED',
-      message: 'Valid admin authentication is required.'
+
+      message:
+        'Valid x-admin-key or Authorization Bearer admin key is required.',
+
+      requestId
+
     });
+
   }
 
-  // ==========================================================
-  // 🚀 ACTION 1: QUERY
-  // ==========================================================
+  // ============================================================
+  // ACTION 1: QUERY
+  // ============================================================
 
   if (action === 'query') {
+
+    // ----------------------------------------------------------
+    // queryType check
+    // ----------------------------------------------------------
+
     if (!queryType) {
+
       return res.status(400).json({
+
         status: 'ERROR',
+
         error: 'MISSING_QUERY_TYPE',
-        message: 'queryType is required.'
+
+        message:
+          'queryType is required.',
+
+        requestId
+
       });
+
     }
+
+    // ----------------------------------------------------------
+    // Registry lookup
+    // ----------------------------------------------------------
 
     const queryConfig =
       QUERY_REGISTRY[queryType];
 
     if (!queryConfig) {
-      log('warn', 'Invalid query type', {
-        queryType
-      });
 
       return res.status(400).json({
+
         status: 'ERROR',
+
         error: 'INVALID_QUERY',
-        message: `Query type "${queryType}" is not allowed.`
+
+        message:
+          `Query type "${queryType}" is not allowed.`,
+
+        allowedQueries:
+          Object.keys(QUERY_REGISTRY),
+
+        requestId
+
       });
+
     }
 
-    if (!Array.isArray(args)) {
-      return res.status(400).json({
-        status: 'ERROR',
-        error: 'INVALID_ARGS',
-        message: 'args must be an array.'
-      });
-    }
+    // ----------------------------------------------------------
+    // Argument validation
+    // ----------------------------------------------------------
+
+    const expectedArgNames =
+      queryConfig.args;
 
     if (
-      args.length !==
-      queryConfig.args.length
+      !Array.isArray(args) ||
+      args.length !== expectedArgNames.length
     ) {
+
       return res.status(400).json({
+
         status: 'ERROR',
+
         error: 'INVALID_ARGS',
+
         message:
-          `Expected ${queryConfig.args.length} argument(s), ` +
-          `received ${args.length}.`
+          `Expected ${expectedArgNames.length} argument(s), received ${Array.isArray(args) ? args.length : 'invalid value'}.`,
+
+        expectedArguments:
+          expectedArgNames,
+
+        requestId
+
       });
+
     }
 
-    // Validate only configured string arguments.
-    for (let i = 0; i < args.length; i++) {
-      if (
-        typeof args[i] !== 'string' ||
-        args[i].trim() === ''
-      ) {
-        return res.status(400).json({
-          status: 'ERROR',
-          error: 'INVALID_ARG',
-          message: `Argument ${i + 1} must be a non-empty string.`
-        });
-      }
-    }
+    // ========================================================
+    // DATABASE TEST
+    // ========================================================
 
     try {
-      // ======================================================
+
+      log(
+        'info',
+        'Attempting database query',
+        {
+          queryType
+        }
+      );
+
+      // ------------------------------------------------------
       // IMPORTANT:
-      // Same DB client as the actual application.
-      // No manual /v2/pipeline fetch.
-      // ======================================================
+      // This uses the SAME getDb() used by processTask.
+      // ------------------------------------------------------
 
       const db = getDb();
 
-      const result = await db.execute({
-        sql: queryConfig.sql,
-        args
-      });
+      if (!db) {
 
-      const rows = result.rows || [];
+        throw new Error(
+          'getDb() returned null or undefined.'
+        );
 
-      log('info', 'Database query successful', {
-        queryType,
-        rowCount: rows.length
-      });
+      }
+
+      log(
+        'info',
+        'getDb() initialized successfully',
+        {
+          queryType,
+          hasDbObject: true
+        }
+      );
+
+      // ------------------------------------------------------
+      // Execute query
+      // ------------------------------------------------------
+
+      const result =
+        await db.execute({
+          sql: queryConfig.sql,
+          args
+        });
+
+      const rows =
+        result?.rows || [];
+
+      log(
+        'info',
+        'Database query successful',
+        {
+          queryType,
+          rowCount: rows.length
+        }
+      );
+
+      // ------------------------------------------------------
+      // SUCCESS
+      // ------------------------------------------------------
 
       return res.status(200).json({
+
         status: 'SUCCESS',
+
         connected: true,
-        message: 'Database connected successfully.',
-        data: rows
+
+        message:
+          'Database connected successfully and query executed.',
+
+        queryType,
+
+        rowCount:
+          rows.length,
+
+        data:
+          rows,
+
+        requestId
+
       });
 
-    } catch (error) {
-      log('error', 'Database query failed', {
-        queryType,
-        error: safeErrorMessage(error)
-      });
+    } catch (err) {
+
+      // ======================================================
+      // 🔥 EXACT DATABASE ERROR FOR REQBIN
+      // ======================================================
+
+      const errorName =
+        err?.name || 'UnknownError';
+
+      const errorMessage =
+        err?.message ||
+        'Unknown database error';
+
+      const errorCode =
+        err?.code ||
+        err?.cause?.code ||
+        null;
+
+      const causeMessage =
+        err?.cause?.message ||
+        null;
+
+      // ------------------------------------------------------
+      // Server log
+      // ------------------------------------------------------
+
+      console.error(
+        '===================================================='
+      );
+
+      console.error(
+        'DATABASE QUERY ERROR'
+      );
+
+      console.error(
+        'Request ID:',
+        requestId
+      );
+
+      console.error(
+        'Query Type:',
+        queryType
+      );
+
+      console.error(
+        'Error Name:',
+        errorName
+      );
+
+      console.error(
+        'Error Message:',
+        errorMessage
+      );
+
+      console.error(
+        'Error Code:',
+        errorCode
+      );
+
+      console.error(
+        'Cause:',
+        causeMessage
+      );
+
+      console.error(
+        'Stack:',
+        err?.stack
+      );
+
+      console.error(
+        '===================================================='
+      );
+
+      // ------------------------------------------------------
+      // IMPORTANT:
+      // URL/token are NEVER returned.
+      // ------------------------------------------------------
 
       return res.status(500).json({
+
         status: 'ERROR',
+
         error: 'DATABASE_ERROR',
+
         connected: false,
-        message: 'Database query failed. Check server logs.',
+
+        message:
+          errorMessage,
+
+        diagnostics: {
+
+          errorName:
+            errorName,
+
+          errorCode:
+            errorCode,
+
+          cause:
+            causeMessage,
+
+          queryType:
+            queryType,
+
+          databaseClient:
+            'getDb()',
+
+          hint:
+            'The request reached Vercel, but getDb().execute() failed.'
+
+        },
+
         requestId
+
       });
+
     }
+
   }
 
-  // ==========================================================
-  // ⚙️ ACTION 2: PROCESS TASK
-  // ==========================================================
+  // ============================================================
+  // ACTION 2: PROCESS TASK
+  // ============================================================
 
   if (action === 'processTask') {
-    const workerId =
-      `worker-${randomUUID().slice(0, 8)}`;
 
     let claimedTask = null;
 
+    const workerId =
+      `worker-${randomUUID().slice(0, 8)}`;
+
     try {
-      const db = getDb();
+
+      const db =
+        getDb();
+
+      if (!db) {
+
+        throw new Error(
+          'getDb() returned null or undefined.'
+        );
+
+      }
 
       // ======================================================
-      // STEP 1
-      // Recover tasks that have exceeded maximum attempts.
-      //
-      // This prevents:
-      // status = in_progress
-      // attempt_count >= MAX_RETRY_ATTEMPTS
-      //
-      // from staying stuck forever.
+      // ATOMIC TASK CLAIM
       // ======================================================
 
-      await db.execute({
-        sql: `
-          UPDATE generation_tasks
-          SET
-            status = 'failed',
-            locked_at = NULL,
-            locked_by = NULL,
-            failed_at = CURRENT_TIMESTAMP,
-            last_error = COALESCE(
-              last_error,
-              'Maximum retry attempts exceeded.'
-            )
-          WHERE
-            (
-              status = 'pending'
-              OR status = 'in_progress'
-            )
-            AND COALESCE(attempt_count, 0) >= ?
-            AND (
-              status = 'pending'
-              OR locked_at IS NULL
-              OR locked_at < datetime(
-                'now',
-                '-' || ? || ' seconds'
-              )
-            )
-        `,
-        args: [
-          MAX_RETRY_ATTEMPTS,
-          String(TASK_LEASE_TIMEOUT_SECONDS)
-        ]
-      });
+      const claimResult =
+        await db.execute({
 
-      // ======================================================
-      // STEP 2
-      // ATOMIC CLAIM
-      //
-      // Instead of:
-      // UPDATE ... ORDER BY ... LIMIT 1
-      //
-      // we select one eligible ID inside the UPDATE.
-      //
-      // This keeps the architecture the same while making the
-      // statement more portable/reliable for SQLite/libSQL.
-      // ======================================================
-
-      const claimResult = await db.execute({
-        sql: `
-          UPDATE generation_tasks
-          SET
-            status = 'in_progress',
-            locked_at = CURRENT_TIMESTAMP,
-            locked_by = ?,
-            attempt_count = COALESCE(attempt_count, 0) + 1,
-            next_retry_at = NULL
-          WHERE id = (
-            SELECT id
-            FROM generation_tasks
+          sql: `
+            UPDATE generation_tasks
+            SET
+              status = 'in_progress',
+              locked_at = CURRENT_TIMESTAMP,
+              locked_by = ?,
+              attempt_count = COALESCE(attempt_count, 0) + 1,
+              next_retry_at = NULL
             WHERE
               (
-                (
-                  status = 'pending'
-                  AND (
-                    next_retry_at IS NULL
-                    OR next_retry_at <= CURRENT_TIMESTAMP
-                  )
-                )
-                OR
-                (
+                status = 'pending'
+                OR (
                   status = 'in_progress'
-                  AND locked_at IS NOT NULL
                   AND locked_at < datetime(
                     'now',
                     '-' || ? || ' seconds'
                   )
                 )
               )
-              AND COALESCE(attempt_count, 0) < ?
-            ORDER BY
-              created_at ASC,
-              id ASC
+              AND (
+                COALESCE(attempt_count, 0)
+                < ?
+              )
+              AND (
+                next_retry_at IS NULL
+                OR next_retry_at <= CURRENT_TIMESTAMP
+              )
+            ORDER BY created_at ASC
             LIMIT 1
-          )
-          RETURNING *
-        `,
-        args: [
-          workerId,
-          String(TASK_LEASE_TIMEOUT_SECONDS),
-          MAX_RETRY_ATTEMPTS
-        ]
-      });
+            RETURNING *
+          `,
+
+          args: [
+            workerId,
+            String(TASK_LEASE_TIMEOUT_SECONDS),
+            String(MAX_RETRY_ATTEMPTS)
+          ]
+
+        });
 
       const task =
-        claimResult.rows?.[0] || null;
+        claimResult?.rows?.[0];
 
-      // ======================================================
-      // NO TASK
-      // ======================================================
+      // ------------------------------------------------------
+      // No task
+      // ------------------------------------------------------
 
       if (!task) {
-        log('info', 'No eligible generation task found');
+
+        log(
+          'info',
+          'No pending task available'
+        );
 
         return res.status(200).json({
+
           status: 'SUCCESS',
-          taskStatus: 'idle',
-          message: 'No pending tasks available.'
+
+          message:
+            'No pending tasks available.',
+
+          requestId
+
         });
+
       }
 
-      claimedTask = task;
+      claimedTask =
+        task;
 
       const attemptsUsed =
         Number(task.attempt_count || 0);
 
-      log('info', 'Task claimed', {
-        taskId: task.id,
-        workerId,
-        attempt: attemptsUsed
-      });
+      log(
+        'info',
+        'Task claimed',
+        {
+          taskId: task.id,
+          workerId,
+          attempt: attemptsUsed
+        }
+      );
 
       // ======================================================
-      // STEP 3
-      // PARSE RAW MCQ INPUT
+      // PARSE RAW MCQs
       // ======================================================
+
+      let rawMCQs = [];
 
       const mcqData =
-        task.raw_mcqs ??
-        task.payload ??
-        task.raw_data ??
-        null;
+        task.raw_mcqs ||
+        task.payload ||
+        task.raw_data;
 
-      const rawMCQs =
-        parseTaskMCQs(mcqData);
+      if (mcqData) {
+
+        try {
+
+          rawMCQs =
+            typeof mcqData === 'string'
+              ? JSON.parse(mcqData)
+              : mcqData;
+
+          if (
+            !Array.isArray(rawMCQs) &&
+            typeof rawMCQs === 'object'
+          ) {
+
+            rawMCQs =
+              rawMCQs.mcqs ||
+              rawMCQs.questions ||
+              [rawMCQs];
+
+          }
+
+        } catch (err) {
+
+          log(
+            'warn',
+            'Failed to parse raw MCQs',
+            {
+              taskId: task.id,
+              error: err?.message
+            }
+          );
+
+        }
+
+      }
 
       // ======================================================
-      // STEP 4
       // EVIDENCE
       // ======================================================
 
@@ -537,222 +751,352 @@ export default async function handler(req, res) {
         task.subject &&
         task.chapter
       ) {
+
         try {
+
           evidenceText =
             await retrieveEvidence(
               task.subject,
               task.chapter
             );
-        } catch (error) {
-          log('warn', 'Evidence retrieval failed', {
-            taskId: task.id,
-            error: safeErrorMessage(error)
-          });
 
-          // Important:
-          // Do not silently continue with unknown evidence.
-          // generateAndStoreMCQs remains the final quality gate.
-          evidenceText = '';
+        } catch (err) {
+
+          log(
+            'warn',
+            'Evidence retrieval failed',
+            {
+              taskId: task.id,
+              error: err?.message
+            }
+          );
+
         }
+
       }
 
       // ======================================================
-      // STEP 5
-      // AI / MCQ PIPELINE
+      // GENERATE + STORE MCQs
       // ======================================================
 
       const result =
         await generateAndStoreMCQs({
-          subject: task.subject,
-          chapter: task.chapter,
-          rawMCQsInput: rawMCQs,
-          evidenceText
+
+          subject:
+            task.subject,
+
+          chapter:
+            task.chapter,
+
+          rawMCQsInput:
+            rawMCQs,
+
+          evidenceText:
+            evidenceText
+
         });
+
+      // ======================================================
+      // RESULT
+      // ======================================================
 
       const success =
         result?.success === true;
 
-      // ======================================================
-      // STEP 6
-      // RETRY DECISION
-      // ======================================================
-
       const canRetry =
-        !success &&
         attemptsUsed < MAX_RETRY_ATTEMPTS;
 
-      let newStatus = 'failed';
+      let newStatus;
 
-      if (success) {
-        newStatus = 'completed';
-      } else if (canRetry) {
-        newStatus = 'pending';
-      }
+      let finalError =
+        null;
 
       const now =
         new Date().toISOString();
 
-      const finalError =
-        success
-          ? null
-          : (
-              result?.error ||
-              'MCQ generation failed.'
-            );
+      // ------------------------------------------------------
+      // SUCCESS
+      // ------------------------------------------------------
 
-      // ======================================================
-      // STEP 7
-      // FINAL UPDATE
-      //
-      // Ownership check:
-      // Only the worker that owns the task can finalize it.
-      // ======================================================
+      if (success) {
 
-      if (canRetry) {
-        const delaySeconds =
-          getRetryDelaySeconds(attemptsUsed);
+        newStatus =
+          'completed';
+
+      }
+
+      // ------------------------------------------------------
+      // RETRY
+      // ------------------------------------------------------
+
+      else if (canRetry) {
+
+        newStatus =
+          'pending';
+
+        const delay =
+          RETRY_DELAY_SECONDS *
+          Math.pow(
+            2,
+            Math.max(0, attemptsUsed - 1)
+          );
 
         await db.execute({
+
           sql: `
             UPDATE generation_tasks
             SET
-              status = 'pending',
+              next_retry_at =
+                datetime(
+                  'now',
+                  '+' || ? || ' seconds'
+                )
+            WHERE id = ?
+              AND locked_by = ?
+              AND status = 'in_progress'
+          `,
+
+          args: [
+            String(delay),
+            task.id,
+            workerId
+          ]
+
+        });
+
+      }
+
+      // ------------------------------------------------------
+      // PERMANENT FAILURE
+      // ------------------------------------------------------
+
+      else {
+
+        newStatus =
+          'failed';
+
+        finalError =
+          result?.error ||
+          'Maximum retry attempts exceeded.';
+
+      }
+
+      // ======================================================
+      // FINAL TASK UPDATE
+      // ======================================================
+
+      const updateResult =
+        await db.execute({
+
+          sql: `
+            UPDATE generation_tasks
+            SET
+              status = ?,
               locked_at = NULL,
               locked_by = NULL,
-              completed_at = NULL,
-              failed_at = NULL,
-              last_error = ?,
-              next_retry_at = datetime(
-                'now',
-                '+' || ? || ' seconds'
-              )
+              completed_at = ?,
+              failed_at = ?,
+              last_error = ?
             WHERE
               id = ?
               AND locked_by = ?
               AND status = 'in_progress'
+            RETURNING id
           `,
+
           args: [
+
+            newStatus,
+
+            success
+              ? now
+              : null,
+
+            (!success && !canRetry)
+              ? now
+              : null,
+
             finalError,
-            String(delaySeconds),
+
             task.id,
+
             workerId
+
           ]
+
         });
 
-        log('warn', 'Task scheduled for retry', {
-          taskId: task.id,
-          attempt: attemptsUsed,
-          retryAfterSeconds: delaySeconds
-        });
+      // ======================================================
+      // OWNERSHIP CHECK
+      // ======================================================
 
-      } else {
-        const updateResult =
-          await db.execute({
-            sql: `
-              UPDATE generation_tasks
-              SET
-                status = ?,
-                locked_at = NULL,
-                locked_by = NULL,
-                completed_at = ?,
-                failed_at = ?,
-                last_error = ?,
-                next_retry_at = NULL
-              WHERE
-                id = ?
-                AND locked_by = ?
-                AND status = 'in_progress'
-              RETURNING id, status
-            `,
-            args: [
-              newStatus,
-              success ? now : null,
-              !success ? now : null,
-              finalError,
-              task.id,
-              workerId
-            ]
-          });
+      if (
+        !updateResult?.rows ||
+        updateResult.rows.length === 0
+      ) {
 
-        if (
-          !updateResult.rows ||
-          updateResult.rows.length === 0
-        ) {
-          log('warn', 'Task ownership lost', {
+        log(
+          'warn',
+          'Task ownership lost',
+          {
             taskId: task.id,
             workerId
-          });
+          }
+        );
 
-          return res.status(409).json({
-            status: 'ERROR',
-            error: 'TASK_OWNERSHIP_LOST',
-            message:
-              'Task ownership was lost before finalization.',
-            requestId
-          });
-        }
+        return res.status(409).json({
 
-        log('info', 'Task finalized', {
-          taskId: task.id,
-          status: newStatus
+          status: 'ERROR',
+
+          error:
+            'TASK_OWNERSHIP_LOST',
+
+          message:
+            'Task was reclaimed by another worker.',
+
+          taskId:
+            task.id,
+
+          requestId
+
         });
+
       }
 
       // ======================================================
-      // STEP 8
-      // RESPONSE SUMMARY
+      // SUMMARY
       // ======================================================
 
       const summary = {
+
         generated:
-          Number(result?.count || 0),
+          result?.count || 0,
 
         inserted:
-          Number(result?.count || 0),
+          result?.count || 0,
 
         rejected:
-          Number(result?.rejectedTotal || 0),
+          result?.rejectedTotal || 0,
 
         duplicates:
-          Number(result?.duplicates || 0)
+          result?.duplicates || 0
+
       };
 
+      log(
+        'info',
+        'Task processed successfully',
+        {
+          taskId: task.id,
+          status: newStatus
+        }
+      );
+
       return res.status(200).json({
-        status: 'SUCCESS',
-        taskId: task.id,
-        taskStatus: newStatus,
-        attempt: attemptsUsed,
+
+        status:
+          'SUCCESS',
+
+        taskId:
+          task.id,
+
+        taskStatus:
+          newStatus,
+
         message:
           success
             ? 'Task completed successfully.'
-            : canRetry
-              ? 'Task failed and has been scheduled for retry.'
-              : 'Task failed permanently.',
+            : (
+                canRetry
+                  ? 'Task failed and will be retried.'
+                  : 'Task failed permanently.'
+              ),
+
         summary,
+
         requestId
+
       });
 
-    } catch (error) {
+    } catch (err) {
+
       // ======================================================
-      // ❌ UNEXPECTED PROCESSING ERROR
+      // 🔥 EXACT PROCESS TASK ERROR
       // ======================================================
+
+      const errorName =
+        err?.name || 'UnknownError';
 
       const errorMessage =
-        safeErrorMessage(error);
+        err?.message ||
+        'Unknown task processing error';
 
-      log('error', 'Task processing exception', {
-        taskId: claimedTask?.id || null,
-        workerId,
-        error: errorMessage
-      });
+      const errorCode =
+        err?.code ||
+        err?.cause?.code ||
+        null;
+
+      const causeMessage =
+        err?.cause?.message ||
+        null;
+
+      console.error(
+        '===================================================='
+      );
+
+      console.error(
+        'TASK PROCESSING ERROR'
+      );
+
+      console.error(
+        'Request ID:',
+        requestId
+      );
+
+      console.error(
+        'Task ID:',
+        claimedTask?.id || null
+      );
+
+      console.error(
+        'Error Name:',
+        errorName
+      );
+
+      console.error(
+        'Error Message:',
+        errorMessage
+      );
+
+      console.error(
+        'Error Code:',
+        errorCode
+      );
+
+      console.error(
+        'Cause:',
+        causeMessage
+      );
+
+      console.error(
+        'Stack:',
+        err?.stack
+      );
+
+      console.error(
+        '===================================================='
+      );
 
       // ======================================================
-      // TRY TO RECOVER CLAIMED TASK
+      // TRY TASK RECOVERY
       // ======================================================
 
-      if (claimedTask?.id) {
+      if (claimedTask) {
+
         try {
-          const db = getDb();
+
+          const db =
+            getDb();
 
           const attemptsUsed =
             Number(
@@ -762,104 +1106,156 @@ export default async function handler(req, res) {
           const canRetry =
             attemptsUsed < MAX_RETRY_ATTEMPTS;
 
+          const newStatus =
+            canRetry
+              ? 'pending'
+              : 'failed';
+
+          const now =
+            new Date().toISOString();
+
           if (canRetry) {
-            const delaySeconds =
-              getRetryDelaySeconds(attemptsUsed);
+
+            const delay =
+              RETRY_DELAY_SECONDS *
+              Math.pow(
+                2,
+                Math.max(0, attemptsUsed - 1)
+              );
 
             await db.execute({
+
               sql: `
                 UPDATE generation_tasks
                 SET
-                  status = 'pending',
-                  locked_at = NULL,
-                  locked_by = NULL,
-                  failed_at = NULL,
-                  last_error = ?,
-                  next_retry_at = datetime(
-                    'now',
-                    '+' || ? || ' seconds'
-                  )
+                  next_retry_at =
+                    datetime(
+                      'now',
+                      '+' || ? || ' seconds'
+                    )
                 WHERE
                   id = ?
                   AND locked_by = ?
                   AND status = 'in_progress'
               `,
+
               args: [
-                errorMessage,
-                String(delaySeconds),
+                String(delay),
                 claimedTask.id,
                 workerId
               ]
+
             });
 
-            log('info', 'Task returned to retry queue', {
-              taskId: claimedTask.id,
-              retryAfterSeconds: delaySeconds
-            });
-
-          } else {
-            await db.execute({
-              sql: `
-                UPDATE generation_tasks
-                SET
-                  status = 'failed',
-                  locked_at = NULL,
-                  locked_by = NULL,
-                  failed_at = CURRENT_TIMESTAMP,
-                  last_error = ?,
-                  next_retry_at = NULL
-                WHERE
-                  id = ?
-                  AND locked_by = ?
-                  AND status = 'in_progress'
-              `,
-              args: [
-                errorMessage,
-                claimedTask.id,
-                workerId
-              ]
-            });
-
-            log('error', 'Task marked permanently failed', {
-              taskId: claimedTask.id
-            });
           }
 
+          await db.execute({
+
+            sql: `
+              UPDATE generation_tasks
+              SET
+                status = ?,
+                locked_at = NULL,
+                locked_by = NULL,
+                failed_at = ?,
+                last_error = ?
+              WHERE
+                id = ?
+                AND locked_by = ?
+                AND status = 'in_progress'
+            `,
+
+            args: [
+
+              newStatus,
+
+              (!canRetry)
+                ? now
+                : null,
+
+              errorMessage,
+
+              claimedTask.id,
+
+              workerId
+
+            ]
+
+          });
+
         } catch (recoveryError) {
-          log(
-            'error',
-            'Failed to recover task after exception',
-            {
-              taskId: claimedTask.id,
-              error: safeErrorMessage(recoveryError)
-            }
+
+          console.error(
+            'Task recovery failed:',
+            recoveryError?.message
           );
+
         }
+
       }
 
       // ======================================================
-      // 🔒 PRODUCTION-SAFE RESPONSE
-      // Do NOT expose raw internal error to client.
-      // Exact error is available in Vercel logs via requestId.
+      // 🔥 DIRECT ERROR TO REQBin
       // ======================================================
 
       return res.status(500).json({
-        status: 'ERROR',
-        error: 'TASK_PROCESSING_ERROR',
-        message: 'Task processing failed. Check server logs.',
+
+        status:
+          'ERROR',
+
+        error:
+          'TASK_PROCESSING_ERROR',
+
+        message:
+          errorMessage,
+
+        diagnostics: {
+
+          errorName:
+            errorName,
+
+          errorCode:
+            errorCode,
+
+          cause:
+            causeMessage,
+
+          taskId:
+            claimedTask?.id || null,
+
+          workerId:
+            workerId,
+
+          hint:
+            'Exact server-side error is returned above. No database credentials are exposed.'
+
+        },
+
         requestId
+
       });
+
     }
+
   }
 
-  // ==========================================================
-  // ❌ INVALID ACTION
-  // ==========================================================
+  // ============================================================
+  // INVALID ACTION
+  // ============================================================
 
   return res.status(400).json({
-    status: 'ERROR',
-    error: 'INVALID_ACTION',
+
+    status:
+      'ERROR',
+
+    error:
+      'INVALID_ACTION',
+
     message:
-      'Action must be "query" or "processTask".'
+      'Action must be "query" or "processTask".',
+
+    requestId
+
   });
+
 }
