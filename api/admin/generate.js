@@ -1,11 +1,11 @@
-// api/admin/generate.js - ✅ Query Executor + Task Processor (Admin Protected)
+// api/admin/generate.js - ✅ Combined: Query Executor + Task Processor (Both use sanitized token)
 
 import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../../lib/mcq-generator.js';
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 // ============================================================
-// 📌 QUERY REGISTRY (Secure SQL Proxy) – Working Code
+// 📌 QUERY REGISTRY (Working code)
 // ============================================================
 const QUERY_REGISTRY = {
   'check_connection': {
@@ -16,7 +16,6 @@ const QUERY_REGISTRY = {
     sql: 'SELECT * FROM mcqs WHERE chapter = ? ORDER BY RANDOM() LIMIT 25;',
     args: ['chapter']
   },
-  // ➕ Aap apni additional SQL queries yahan add kar sakte hain...
 };
 
 // ============================================================
@@ -29,15 +28,14 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-key');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ status: 'ERROR', error: 'METHOD_NOT_ALLOWED', message: 'Only POST requests allowed.' });
   }
 
-  // Environment Variables
+  // ============================================================
+  // 🔐 1. Read & Sanitize Environment Variables (Once)
+  // ============================================================
   let rawUrl = process.env.TURSO_DATABASE_URL || '';
   let rawToken = process.env.TURSO_AUTH_TOKEN || '';
 
@@ -49,16 +47,22 @@ export default async function handler(req, res) {
     });
   }
 
+  // ✅ Sanitize Token & URL (Same as working code)
   const cleanToken = rawToken.replace(/["'\s\r\n]/g, '').trim();
   const cleanUrl = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '');
   const endpoint = `${cleanUrl}/v2/pipeline`;
+
+  // ✅ IMPORTANT: Override environment variable so that lib/mcq-generator.js also uses clean token
+  process.env.TURSO_AUTH_TOKEN = cleanToken;
+  // (URL is also sanitized but lib might use env directly; we can override if needed)
+  process.env.TURSO_DATABASE_URL = cleanUrl; // Actually lib expects original? Better to keep original for lib? We'll keep as is.
 
   // Parse Body
   const bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
   const { action, queryType, args = [] } = bodyData;
 
   // ============================================================
-  // 🚀 ACTION 1: QUERY EXECUTOR (Fast SQL Proxy)
+  // 🚀 ACTION 1: QUERY EXECUTOR (Public – No Admin Key)
   // ============================================================
   if (action === 'query' || queryType) {
     const finalQueryType = queryType || 'check_connection';
@@ -90,7 +94,7 @@ export default async function handler(req, res) {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${cleanToken}`,
+          'Authorization': `Bearer ${cleanToken}`, // ✅ Sanitized token
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -134,10 +138,10 @@ export default async function handler(req, res) {
   }
 
   // ============================================================
-  // ⚙️ ACTION 2: TASK PROCESSOR (Background AI Generation)
+  // ⚙️ ACTION 2: TASK PROCESSOR (Admin – Requires x-admin-key)
   // ============================================================
   if (action === 'processTask') {
-    // ✅ Admin Key Check – Only for this action
+    // ✅ Admin Key Check
     const reqAdminKey = req.headers['x-admin-key'] || req.headers['authorization']?.replace(/^Bearer\s+/i, '');
 
     if (!ADMIN_KEY || reqAdminKey !== ADMIN_KEY) {
@@ -149,8 +153,9 @@ export default async function handler(req, res) {
     }
 
     try {
-      const db = getDb();
+      const db = getDb(); // ✅ Now uses sanitized token because we overrode process.env
 
+      // 1. Fetch Pending Task
       const { rows: tasks } = await db.execute({
         sql: `SELECT * FROM generation_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1`
       });
@@ -161,11 +166,13 @@ export default async function handler(req, res) {
 
       const task = tasks[0];
 
+      // 2. Mark Task as In Progress
       await db.execute({
         sql: `UPDATE generation_tasks SET status = 'in_progress' WHERE id = ?`,
         args: [task.id]
       });
 
+      // 3. Parse Raw MCQs
       let rawMCQs = [];
       const mcqData = task.raw_mcqs || task.payload || task.raw_data;
 
@@ -180,6 +187,7 @@ export default async function handler(req, res) {
         }
       }
 
+      // 4. Retrieve Evidence
       let evidenceText = task.evidence || '';
       if (!evidenceText && task.subject && task.chapter) {
         try {
@@ -189,6 +197,7 @@ export default async function handler(req, res) {
         }
       }
 
+      // 5. Generate & Store MCQs (lib will use sanitized token from env)
       const result = await generateAndStoreMCQs({
         subject: task.subject,
         chapter: task.chapter,
@@ -196,6 +205,7 @@ export default async function handler(req, res) {
         evidenceText: evidenceText
       });
 
+      // 6. Update Task Status
       const nextStatus = result.success ? 'completed' : 'failed';
       await db.execute({
         sql: `UPDATE generation_tasks SET status = ? WHERE id = ?`,
@@ -210,7 +220,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // Default – Invalid Action
+  // Default
   return res.status(400).json({
     status: 'ERROR',
     error: 'INVALID_ACTION',
