@@ -1,11 +1,11 @@
-// api/admin/generate.js - ✅ Combined: Query Executor + Task Processor (Both use sanitized token)
+// api/admin/generate.js - ✅ Query Executor + Task Processor (Only token sanitized, URL untouched)
 
 import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../../lib/mcq-generator.js';
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 // ============================================================
-// 📌 QUERY REGISTRY (Working code)
+// 📌 QUERY REGISTRY (Secure SQL Proxy)
 // ============================================================
 const QUERY_REGISTRY = {
   'check_connection': {
@@ -16,6 +16,7 @@ const QUERY_REGISTRY = {
     sql: 'SELECT * FROM mcqs WHERE chapter = ? ORDER BY RANDOM() LIMIT 25;',
     args: ['chapter']
   },
+  // ➕ आप अपनी और Queries यहाँ जोड़ सकते हैं
 };
 
 // ============================================================
@@ -33,9 +34,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ status: 'ERROR', error: 'METHOD_NOT_ALLOWED', message: 'Only POST requests allowed.' });
   }
 
-  // ============================================================
-  // 🔐 1. Read & Sanitize Environment Variables (Once)
-  // ============================================================
+  // Environment Variables
   let rawUrl = process.env.TURSO_DATABASE_URL || '';
   let rawToken = process.env.TURSO_AUTH_TOKEN || '';
 
@@ -47,15 +46,15 @@ export default async function handler(req, res) {
     });
   }
 
-  // ✅ Sanitize Token & URL (Same as working code)
+  // ✅ Sanitize Token & URL (URL is sanitized for fetch, but we keep original for lib)
   const cleanToken = rawToken.replace(/["'\s\r\n]/g, '').trim();
   const cleanUrl = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '');
   const endpoint = `${cleanUrl}/v2/pipeline`;
 
-  // ✅ IMPORTANT: Override environment variable so that lib/mcq-generator.js also uses clean token
+  // ✅ CRITICAL FIX: Override ONLY the token in environment.
+  // Leave TURSO_DATABASE_URL untouched (it's libsql://) so @libsql/client works.
   process.env.TURSO_AUTH_TOKEN = cleanToken;
-  // (URL is also sanitized but lib might use env directly; we can override if needed)
-  process.env.TURSO_DATABASE_URL = cleanUrl; // Actually lib expects original? Better to keep original for lib? We'll keep as is.
+  // Do NOT override process.env.TURSO_DATABASE_URL
 
   // Parse Body
   const bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
@@ -94,7 +93,7 @@ export default async function handler(req, res) {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${cleanToken}`, // ✅ Sanitized token
+          'Authorization': `Bearer ${cleanToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -153,7 +152,7 @@ export default async function handler(req, res) {
     }
 
     try {
-      const db = getDb(); // ✅ Now uses sanitized token because we overrode process.env
+      const db = getDb(); // ✅ Now uses sanitized token (overridden) and original libsql:// URL
 
       // 1. Fetch Pending Task
       const { rows: tasks } = await db.execute({
