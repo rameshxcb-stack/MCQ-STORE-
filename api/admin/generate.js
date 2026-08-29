@@ -1,12 +1,12 @@
-// api/admin/generate.js - ✅ Production-Grade (All P0/P1 Bugs Fixed)
+// api/admin/generate.js - ✅ Production-Grade (Unified Database Client)
 
 import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../../lib/mcq-generator.js';
 import { randomUUID } from 'crypto';
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 const MAX_RETRY_ATTEMPTS = 3;
-const TASK_LEASE_TIMEOUT_SECONDS = 180; // 3 minutes – realistic for AI
-const RETRY_DELAY_SECONDS = 30; // initial retry delay
+const TASK_LEASE_TIMEOUT_SECONDS = 180; // 3 minutes
+const RETRY_DELAY_SECONDS = 30;
 
 // ============================================================
 // 📌 QUERY REGISTRY (Admin-only secure SQL proxy)
@@ -50,6 +50,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ status: 'ERROR', error: 'METHOD_NOT_ALLOWED', message: 'Only POST allowed.' });
   }
 
+  // Environment variables – only needed for processTask (fetch uses getDb)
   const rawUrl = (process.env.TURSO_DATABASE_URL || '').trim();
   const rawToken = (process.env.TURSO_AUTH_TOKEN || '').trim();
   if (!rawUrl || !rawToken) {
@@ -57,9 +58,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ status: 'ERROR', error: 'MISSING_CREDENTIALS', message: 'Env vars missing.' });
   }
 
-  const cleanToken = rawToken.replace(/^Bearer\s+/i, '').replace(/["'\s\r\n]/g, '').trim();
-  const cleanUrl = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '');
-  const endpoint = `${cleanUrl}/v2/pipeline`;
+  // We keep rawToken/rawUrl for processTask (though getDb uses env directly)
+  // but we still need to sanitize token for potential fallback? Not needed now.
 
   let bodyData = {};
   try {
@@ -79,13 +79,13 @@ export default async function handler(req, res) {
   }
 
   // ============================================================
-  // 🚀 ACTION 1: QUERY EXECUTOR (Admin Only)
+  // 🚀 ACTION 1: QUERY EXECUTOR (Admin Only) – Now uses getDb()
   // ============================================================
   if (action === 'query') {
-    // Strict action check – queryType must be present and valid
     if (!queryType) {
-      return res.status(400).json({ status: 'ERROR', error: 'MISSING_QUERY_TYPE', message: 'queryType required for query action.' });
+      return res.status(400).json({ status: 'ERROR', error: 'MISSING_QUERY_TYPE', message: 'queryType required.' });
     }
+
     const queryConfig = QUERY_REGISTRY[queryType];
     if (!queryConfig) {
       log('error', 'Invalid query type', { queryType });
@@ -98,39 +98,35 @@ export default async function handler(req, res) {
     }
     for (let i = 0; i < args.length; i++) {
       if (typeof args[i] !== 'string' || args[i].trim() === '') {
-        return res.status(400).json({ status: 'ERROR', error: 'INVALID_ARG_TYPE', message: `Arg ${i+1} must be non-empty string.` });
+        return res.status(400).json({ status: 'ERROR', error: 'INVALID_ARG', message: `Arg ${i+1} must be non-empty string.` });
       }
     }
 
-    const queryToExecute = queryConfig.sql;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8500);
-
     try {
-      log('info', 'Executing query', { queryType, args });
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${cleanToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: [ { type: "execute", stmt: { sql: queryToExecute, args } }, { type: "close" } ] }),
-        signal: controller.signal
+      const db = getDb(); // ✅ Unified database client – same as processTask
+      const result = await db.execute({
+        sql: queryConfig.sql,
+        args: args
       });
 
-      clearTimeout(timeoutId);
-      const data = await response.json();
+      const rows = result.rows || [];
+      log('info', 'Query successful', { queryType, rowCount: rows.length });
 
-      if (response.ok) {
-        const rows = data.results?.[0]?.response?.result?.rows || [];
-        log('info', 'Query successful', { rowCount: rows.length });
-        return res.status(200).json({ status: 'SUCCESS', connected: true, message: '✅ Query executed.', data: rows });
-      } else {
-        log('error', 'Turso query failed', { status: response.status });
-        return res.status(response.status).json({ status: 'ERROR', error: 'DATABASE_ERROR', message: 'Database query failed.' });
-      }
+      return res.status(200).json({
+        status: 'SUCCESS',
+        connected: true,
+        message: '✅ Database connected successfully!',
+        data: rows
+      });
+
     } catch (err) {
-      clearTimeout(timeoutId);
-      log('error', 'Query exception', { error: err.message });
-      if (err.name === 'AbortError') return res.status(504).json({ status: 'ERROR', error: 'TIMEOUT' });
-      return res.status(500).json({ status: 'ERROR', error: 'SERVER_ERROR', message: 'Internal server error.' });
+      log('error', 'Database query failed', { queryType, error: err.message });
+      return res.status(500).json({
+        status: 'ERROR',
+        error: 'DATABASE_ERROR',
+        connected: false,
+        message: 'Database query failed. Check logs.'
+      });
     }
   }
 
@@ -144,7 +140,7 @@ export default async function handler(req, res) {
     try {
       const db = getDb();
 
-      // ✅ Atomic Claim: pending OR stale in_progress (with lease)
+      // Atomic Claim: pending OR stale in_progress (with lease)
       const claimResult = await db.execute({
         sql: `
           UPDATE generation_tasks
@@ -177,11 +173,10 @@ export default async function handler(req, res) {
       }
 
       claimedTask = task;
-      // ✅ Fix: attempt_count already incremented, so use it directly
       const attemptsUsed = task.attempt_count || 0; // already incremented
       log('info', 'Task claimed', { taskId: task.id, attempt: attemptsUsed });
 
-      // Process
+      // Process the task
       let rawMCQs = [];
       const mcqData = task.raw_mcqs || task.payload || task.raw_data;
       if (mcqData) {
@@ -201,7 +196,6 @@ export default async function handler(req, res) {
           evidenceText = await retrieveEvidence(task.subject, task.chapter);
         } catch (e) {
           log('warn', 'Evidence retrieval failed', { taskId: task.id, error: e.message });
-          // Continue – generator may have internal fallback
         }
       }
 
@@ -233,7 +227,7 @@ export default async function handler(req, res) {
         finalError = result.error || 'Max retries exceeded';
       }
 
-      // ✅ Ownership check in final update
+      // Update with ownership check
       const updateResult = await db.execute({
         sql: `
           UPDATE generation_tasks
@@ -259,14 +253,12 @@ export default async function handler(req, res) {
         ]
       });
 
-      // If no rows updated, someone else claimed it – log and exit gracefully
       if (!updateResult.rows || updateResult.rows.length === 0) {
         log('warn', 'Task ownership lost during processing', { taskId: task.id });
         return res.status(409).json({ status: 'ERROR', error: 'TASK_OWNERSHIP_LOST', message: 'Task was reclaimed by another worker.' });
       }
 
       log('info', 'Task updated', { taskId: task.id, newStatus });
-      // ✅ Return only summary, not full result
       const summary = {
         generated: result.count || 0,
         inserted: result.count || 0,
@@ -283,16 +275,14 @@ export default async function handler(req, res) {
       });
 
     } catch (e) {
-      // Exception handling with ownership check
       log('error', 'Task processing exception', { taskId: claimedTask?.id, error: e.message });
       if (claimedTask) {
         try {
           const db = getDb();
-          const attemptsUsed = claimedTask.attempt_count || 0; // already incremented
+          const attemptsUsed = claimedTask.attempt_count || 0;
           const canRetry = attemptsUsed < MAX_RETRY_ATTEMPTS;
           const newStatus = canRetry ? 'pending' : 'failed';
 
-          // Set retry delay if pending
           if (canRetry) {
             const delay = RETRY_DELAY_SECONDS * Math.pow(2, attemptsUsed - 1);
             await db.execute({
@@ -301,7 +291,6 @@ export default async function handler(req, res) {
             });
           }
 
-          // Update with ownership check
           await db.execute({
             sql: `
               UPDATE generation_tasks
@@ -332,7 +321,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // Invalid action
   return res.status(400).json({
     status: 'ERROR',
     error: 'INVALID_ACTION',
