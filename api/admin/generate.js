@@ -1,11 +1,11 @@
-// api/admin/generate.js - ✅ Safe and Simple
+// api/admin/generate.js - ✅ Query Executor + Task Processor (Admin Protected)
 
 import { generateAndStoreMCQs, retrieveEvidence, getDb } from '../../lib/mcq-generator.js';
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 // ============================================================
-// 📌 QUERY REGISTRY (Secure SQL Proxy)
+// 📌 QUERY REGISTRY (Secure SQL Proxy) – Working Code
 // ============================================================
 const QUERY_REGISTRY = {
   'check_connection': {
@@ -16,25 +16,30 @@ const QUERY_REGISTRY = {
     sql: 'SELECT * FROM mcqs WHERE chapter = ? ORDER BY RANDOM() LIMIT 25;',
     args: ['chapter']
   },
+  // ➕ Aap apni additional SQL queries yahan add kar sakte hain...
 };
 
 // ============================================================
 // 🔧 MAIN HANDLER
 // ============================================================
 export default async function handler(req, res) {
+  // CORS Headers
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-key');
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ status: 'ERROR', error: 'METHOD_NOT_ALLOWED', message: 'Only POST requests allowed.' });
   }
 
-  // Environment Variables – सिर्फ trim() करें, बाकी कुछ नहीं
-  const rawUrl = (process.env.TURSO_DATABASE_URL || '').trim();
-  const rawToken = (process.env.TURSO_AUTH_TOKEN || '').trim();
+  // Environment Variables
+  let rawUrl = process.env.TURSO_DATABASE_URL || '';
+  let rawToken = process.env.TURSO_AUTH_TOKEN || '';
 
   if (!rawUrl || !rawToken) {
     return res.status(500).json({
@@ -44,19 +49,12 @@ export default async function handler(req, res) {
     });
   }
 
+  const cleanToken = rawToken.replace(/["'\s\r\n]/g, '').trim();
   const cleanUrl = rawUrl.replace('libsql://', 'https://').replace(/\/$/, '');
   const endpoint = `${cleanUrl}/v2/pipeline`;
 
-  // ============================================================
-  // 🛡️ Safe Body Parsing
-  // ============================================================
-  let bodyData = {};
-  try {
-    bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-  } catch (e) {
-    return res.status(400).json({ status: 'ERROR', error: 'INVALID_JSON', message: 'Invalid JSON in request body.' });
-  }
-
+  // Parse Body
+  const bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
   const { action, queryType, args = [] } = bodyData;
 
   // ============================================================
@@ -70,18 +68,18 @@ export default async function handler(req, res) {
       return res.status(403).json({
         status: 'ERROR',
         error: 'INVALID_QUERY',
-        message: `Query type "${finalQueryType}" is not allowed.`
+        message: `Query type "${finalQueryType}" allowed nahi hai. Available: ${Object.keys(QUERY_REGISTRY).join(', ')}`
       });
     }
 
     const queryToExecute = queryConfig.sql;
     const expectedArgNames = queryConfig.args;
 
-    if (!Array.isArray(args) || args.length !== expectedArgNames.length) {
+    if (args.length !== expectedArgNames.length) {
       return res.status(400).json({
         status: 'ERROR',
         error: 'INVALID_ARGS',
-        message: `Expected ${expectedArgNames.length} argument(s) but received ${args.length}.`
+        message: `${expectedArgNames.length} argument(s) chahiye, par ${args.length} mile.`
       });
     }
 
@@ -92,7 +90,7 @@ export default async function handler(req, res) {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${rawToken}`,  // ✅ Raw Token – कोई Regex नहीं
+          'Authorization': `Bearer ${cleanToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -110,7 +108,7 @@ export default async function handler(req, res) {
       if (response.ok) {
         return res.status(200).json({
           status: 'SUCCESS',
-          message: '✅ Query executed successfully!',
+          message: '✅ Query execute ho gayi!',
           data: data.results?.[0]?.response?.result || data
         });
       } else {
@@ -139,6 +137,7 @@ export default async function handler(req, res) {
   // ⚙️ ACTION 2: TASK PROCESSOR (Background AI Generation)
   // ============================================================
   if (action === 'processTask') {
+    // ✅ Admin Key Check – Only for this action
     const reqAdminKey = req.headers['x-admin-key'] || req.headers['authorization']?.replace(/^Bearer\s+/i, '');
 
     if (!ADMIN_KEY || reqAdminKey !== ADMIN_KEY) {
@@ -211,6 +210,7 @@ export default async function handler(req, res) {
     }
   }
 
+  // Default – Invalid Action
   return res.status(400).json({
     status: 'ERROR',
     error: 'INVALID_ACTION',
