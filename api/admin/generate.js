@@ -1,21 +1,27 @@
 // api/admin/generate.js
 // ============================================================
-// ADMIN MCQ GENERATION API
-// ============================================================
+// PRODUCTION ADMIN API
+// Turso is accessed ONLY through /lib/db.js
+//
 // IMPORTANT:
-// - Turso connection is handled centrally by lib/db.js
-// - No hardcoded Turso URL/token
-// - Uses getDb() from lib/mcq-generator.js
-// - Admin authentication required for every action
+// - No @libsql/client here
+// - No direct Turso credentials here
+// - No hardcoded token
+// - No hardcoded_test action
+// - All DB operations use the central HTTP DB client
 // ============================================================
 
 import {
   generateAndStoreMCQs,
-  retrieveEvidence,
+  retrieveEvidence
+} from '../../lib/mcq-generator.js';
+
+import {
   getDb,
   getDbDiagnostics,
-  safeDbError
-} from '../../lib/mcq-generator.js';
+  safeDbError,
+  diagnoseTurso
+} from '../../lib/db.js';
 
 import { randomUUID } from 'crypto';
 
@@ -26,11 +32,14 @@ import { randomUUID } from 'crypto';
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 const MAX_RETRY_ATTEMPTS = 3;
-const TASK_LEASE_TIMEOUT_SECONDS = 120;
+
+const TASK_LEASE_TIMEOUT_SECONDS = 180;
+
 const RETRY_DELAY_SECONDS = 30;
 
 // ============================================================
 // QUERY REGISTRY
+// Admin-only allowlisted SQL
 // ============================================================
 
 const QUERY_REGISTRY = {
@@ -72,13 +81,15 @@ function safeErrorMessage(error) {
     return 'Unknown error';
   }
 
-  return String(error?.message || error)
+  return String(
+    error?.message || error
+  )
     .replace(/\s+/g, ' ')
     .slice(0, 1000);
 }
 
 // ------------------------------------------------------------
-// Parse task MCQs
+// Parse task MCQs safely
 // ------------------------------------------------------------
 
 function parseTaskMCQs(value) {
@@ -96,7 +107,10 @@ function parseTaskMCQs(value) {
       return parsed;
     }
 
-    if (parsed && typeof parsed === 'object') {
+    if (
+      parsed &&
+      typeof parsed === 'object'
+    ) {
       if (Array.isArray(parsed.mcqs)) {
         return parsed.mcqs;
       }
@@ -119,15 +133,17 @@ function parseTaskMCQs(value) {
 // ------------------------------------------------------------
 
 function getRetryDelaySeconds(attemptNumber) {
-  return RETRY_DELAY_SECONDS *
+  return (
+    RETRY_DELAY_SECONDS *
     Math.pow(
       2,
       Math.max(0, attemptNumber - 1)
-    );
+    )
+  );
 }
 
 // ------------------------------------------------------------
-// Admin authentication
+// Admin key
 // ------------------------------------------------------------
 
 function getAdminKey(req) {
@@ -138,12 +154,17 @@ function getAdminKey(req) {
     return String(headerKey);
   }
 
-  const auth =
+  const authorization =
     req.headers['authorization'];
 
-  return auth
-    ? auth.replace(/^Bearer\s+/i, '')
-    : null;
+  if (authorization) {
+    return authorization.replace(
+      /^Bearer\s+/i,
+      ''
+    );
+  }
+
+  return null;
 }
 
 // ============================================================
@@ -157,7 +178,7 @@ export default async function handler(req, res) {
   const startedAt = Date.now();
 
   // ----------------------------------------------------------
-  // Logger
+  // Structured logger
   // ----------------------------------------------------------
 
   const log = (
@@ -217,21 +238,21 @@ export default async function handler(req, res) {
   }
 
   // ----------------------------------------------------------
-  // Method validation
+  // Only POST
   // ----------------------------------------------------------
 
   if (req.method !== 'POST') {
     return res.status(405).json({
       status: 'ERROR',
       error: 'METHOD_NOT_ALLOWED',
-      message: 'Only POST allowed.',
+      message: 'Only POST requests are allowed.',
       requestId
     });
   }
 
-  // ==========================================================
-  // PARSE BODY
-  // ==========================================================
+  // ----------------------------------------------------------
+  // Parse body
+  // ----------------------------------------------------------
 
   let bodyData = {};
 
@@ -253,7 +274,7 @@ export default async function handler(req, res) {
     return res.status(400).json({
       status: 'ERROR',
       error: 'INVALID_JSON',
-      message: 'Invalid JSON.',
+      message: 'Invalid JSON request body.',
       requestId
     });
   }
@@ -288,127 +309,37 @@ export default async function handler(req, res) {
       status: 'ERROR',
       error: 'UNAUTHORIZED',
       message:
-        'Valid x-admin-key required.',
+        'Valid x-admin-key is required.',
       requestId
     });
   }
 
   // ==========================================================
-  // ACTION: diagnose
-  // ==========================================================
-  // Tests the central Turso connection.
-  //
-  // This does NOT expose:
-  // - Turso token
-  // - full credentials
-  //
-  // It only returns safe diagnostics.
+  // ACTION 1: DIAGNOSE
   // ==========================================================
 
   if (action === 'diagnose') {
     try {
       const diagnostics =
-        getDbDiagnostics();
+        await diagnoseTurso();
 
       log(
-        'info',
-        'Database diagnostics requested',
+        diagnostics.success
+          ? 'info'
+          : 'error',
+        'Database diagnosis completed',
         {
-          urlConfigured:
-            diagnostics?.urlConfigured ?? null,
-
-          tokenConfigured:
-            diagnostics?.tokenConfigured ?? null,
-
-          urlProtocol:
-            diagnostics?.urlProtocol ?? null,
-
-          urlHost:
-            diagnostics?.urlHost ?? null,
-
-          tokenLength:
-            diagnostics?.tokenLength ?? null
+          success:
+            diagnostics.success
         }
       );
 
-      const db = getDb();
-
-      const result =
-        await db.execute({
-          sql:
-            'SELECT 1 AS is_active;',
-          args: []
-        });
-
-      const row =
-        result?.rows?.[0] || {};
-
-      const connected =
-        Number(row?.is_active) === 1 ||
-        row?.is_active === true;
-
-      if (!connected) {
-        return res.status(500).json({
-          status: 'ERROR',
-          error:
-            'DATABASE_TEST_FAILED',
-          message:
-            'Turso responded, but SELECT 1 did not return the expected result.',
-          connected: false,
-          diagnostics: {
-            urlConfigured:
-              diagnostics?.urlConfigured ?? false,
-
-            tokenConfigured:
-              diagnostics?.tokenConfigured ?? false,
-
-            urlProtocol:
-              diagnostics?.urlProtocol ?? null,
-
-            urlHost:
-              diagnostics?.urlHost ?? null,
-
-            tokenLength:
-              diagnostics?.tokenLength ?? null,
-
-            select1: {
-              success: false,
-              value:
-                row?.is_active ?? null
-            }
-          },
-          requestId
-        });
-      }
-
-      return res.status(200).json({
-        status: 'SUCCESS',
-        error: null,
-        message:
-          'Turso connection and SELECT 1 succeeded.',
-        connected: true,
-        diagnostics: {
-          urlConfigured:
-            diagnostics?.urlConfigured ?? false,
-
-          tokenConfigured:
-            diagnostics?.tokenConfigured ?? false,
-
-          urlProtocol:
-            diagnostics?.urlProtocol ?? null,
-
-          urlHost:
-            diagnostics?.urlHost ?? null,
-
-          tokenLength:
-            diagnostics?.tokenLength ?? null,
-
-          select1: {
-            success: true,
-            value:
-              row?.is_active ?? null
-          }
-        },
+      return res.status(
+        diagnostics.success
+          ? 200
+          : 500
+      ).json({
+        ...diagnostics,
         requestId
       });
 
@@ -416,116 +347,62 @@ export default async function handler(req, res) {
       const dbError =
         safeDbError(error);
 
-      const diagnostics =
-        getDbDiagnostics();
-
       log(
         'error',
         'Database diagnosis failed',
         {
           error:
             dbError.message,
-
-          code:
-            dbError.code,
-
-          diagnostics
+          errorCode:
+            dbError.code
         }
       );
 
       return res.status(500).json({
         status: 'ERROR',
-        error:
-          'TURSO_CONNECTION_FAILED',
+        error: 'DIAGNOSIS_FAILED',
         connected: false,
         message:
           dbError.message,
-        diagnostics: {
-          errorName:
-            dbError.name,
-
-          errorCode:
-            dbError.code,
-
-          cause:
-            dbError.message,
-
-          databaseConfig: {
-            urlConfigured:
-              diagnostics?.urlConfigured ?? false,
-
-            tokenConfigured:
-              diagnostics?.tokenConfigured ?? false,
-
-            urlProtocol:
-              diagnostics?.urlProtocol ?? null,
-
-            urlHost:
-              diagnostics?.urlHost ?? null,
-
-            tokenLength:
-              diagnostics?.tokenLength ?? null
-          },
-
-          hint:
-            'The database credentials are never returned. Check the exact Turso error above.'
-        },
+        diagnostics:
+          getDbDiagnostics(),
         requestId
       });
     }
   }
 
   // ==========================================================
-  // ACTION: query
+  // ACTION 2: QUERY
   // ==========================================================
 
   if (action === 'query') {
-
-    // --------------------------------------------------------
-    // Validate query type
-    // --------------------------------------------------------
-
     if (!queryType) {
       return res.status(400).json({
         status: 'ERROR',
         error: 'MISSING_QUERY_TYPE',
         message:
-          'queryType required.',
+          'queryType is required.',
         requestId
       });
     }
-
-    // --------------------------------------------------------
-    // Query allow-list
-    // --------------------------------------------------------
 
     const queryConfig =
       QUERY_REGISTRY[queryType];
 
     if (!queryConfig) {
+      log(
+        'error',
+        'Invalid query type',
+        {
+          queryType
+        }
+      );
+
       return res.status(400).json({
         status: 'ERROR',
         error: 'INVALID_QUERY',
         message:
-          `Query type "${queryType}" not allowed.`,
-        requestId
-      });
-    }
-
-    // --------------------------------------------------------
-    // Validate args count
-    // --------------------------------------------------------
-
-    if (
-      !Array.isArray(args) ||
-      args.length !==
-        queryConfig.args.length
-    ) {
-      return res.status(400).json({
-        status: 'ERROR',
-        error: 'INVALID_ARGS',
-        message:
-          `Expected ${queryConfig.args.length} args.`,
+          `Query type "${queryType}" is not allowed.`,
         requestId
       });
     }
@@ -533,6 +410,23 @@ export default async function handler(req, res) {
     // --------------------------------------------------------
     // Validate arguments
     // --------------------------------------------------------
+
+    const expectedArgNames =
+      queryConfig.args;
+
+    if (
+      !Array.isArray(args) ||
+      args.length !==
+        expectedArgNames.length
+    ) {
+      return res.status(400).json({
+        status: 'ERROR',
+        error: 'INVALID_ARGS',
+        message:
+          `Expected ${expectedArgNames.length} argument(s).`,
+        requestId
+      });
+    }
 
     for (
       let i = 0;
@@ -547,14 +441,14 @@ export default async function handler(req, res) {
           status: 'ERROR',
           error: 'INVALID_ARG',
           message:
-            `Argument ${i + 1} must be non-empty string.`,
+            `Argument ${i + 1} must be a non-empty string.`,
           requestId
         });
       }
     }
 
     // --------------------------------------------------------
-    // Execute query
+    // Execute using CENTRAL HTTP DB
     // --------------------------------------------------------
 
     try {
@@ -562,13 +456,12 @@ export default async function handler(req, res) {
 
       const result =
         await db.execute({
-          sql:
-            queryConfig.sql,
+          sql: queryConfig.sql,
           args
         });
 
       const rows =
-        result?.rows || [];
+        result.rows || [];
 
       log(
         'info',
@@ -584,7 +477,7 @@ export default async function handler(req, res) {
         status: 'SUCCESS',
         connected: true,
         message:
-          'Database connected successfully.',
+          'Database query executed successfully.',
         data: rows,
         diagnostics: {
           queryType,
@@ -608,6 +501,10 @@ export default async function handler(req, res) {
           queryType,
           error:
             dbError.message,
+          errorName:
+            dbError.name,
+          errorCode:
+            dbError.code,
           diagnostics
         }
       );
@@ -630,35 +527,38 @@ export default async function handler(req, res) {
 
           databaseConfig: {
             urlConfigured:
-              diagnostics?.urlConfigured ?? false,
+              diagnostics.urlConfigured,
 
             tokenConfigured:
-              diagnostics?.tokenConfigured ?? false,
+              diagnostics.tokenConfigured,
 
             urlProtocol:
-              diagnostics?.urlProtocol ?? null,
+              diagnostics.urlProtocol ||
+              null,
 
             urlHost:
-              diagnostics?.urlHost ?? null,
+              diagnostics.urlHost ||
+              null,
 
             tokenLength:
-              diagnostics?.tokenLength ?? null
+              diagnostics.tokenLength ||
+              null
           },
 
           hint:
-            'No database credentials are exposed in this response.'
+            'Database access is handled only by lib/db.js. No database token is exposed.'
         },
+
         requestId
       });
     }
   }
 
   // ==========================================================
-  // ACTION: processTask
+  // ACTION 3: processTask
   // ==========================================================
 
   if (action === 'processTask') {
-
     const workerId =
       `worker-${randomUUID().slice(0, 8)}`;
 
@@ -668,7 +568,7 @@ export default async function handler(req, res) {
       const db = getDb();
 
       // ------------------------------------------------------
-      // Recover tasks that exceeded maximum attempts
+      // Recover tasks that exceeded retry limit
       // ------------------------------------------------------
 
       await db.execute({
@@ -682,16 +582,17 @@ export default async function handler(req, res) {
             last_error = 'Maximum retry attempts exceeded.',
             next_retry_at = NULL
           WHERE
-            (status = 'pending' OR status = 'in_progress')
+            (status = 'pending'
+             OR status = 'in_progress')
             AND COALESCE(attempt_count, 0) >= ?
             AND (
               status = 'pending'
               OR locked_at IS NULL
               OR locked_at <
-                datetime(
-                  'now',
-                  '-' || ? || ' seconds'
-                )
+                 datetime(
+                   'now',
+                   '-' || ? || ' seconds'
+                 )
             )
         `,
         args: [
@@ -720,26 +621,33 @@ export default async function handler(req, res) {
             WHERE id = (
               SELECT id
               FROM generation_tasks
-              WHERE (
+              WHERE
                 (
-                  status = 'pending'
-                  AND (
-                    next_retry_at IS NULL
-                    OR next_retry_at <= CURRENT_TIMESTAMP
+                  (
+                    status = 'pending'
+                    AND (
+                      next_retry_at IS NULL
+                      OR next_retry_at <= CURRENT_TIMESTAMP
+                    )
+                  )
+                  OR
+                  (
+                    status = 'in_progress'
+                    AND locked_at IS NOT NULL
+                    AND locked_at <
+                        datetime(
+                          'now',
+                          '-' || ? || ' seconds'
+                        )
                   )
                 )
-                OR (
-                  status = 'in_progress'
-                  AND locked_at IS NOT NULL
-                  AND locked_at <
-                    datetime(
-                      'now',
-                      '-' || ? || ' seconds'
-                    )
-                )
-              )
-              AND COALESCE(attempt_count, 0) < ?
-              ORDER BY created_at ASC, id ASC
+                AND COALESCE(
+                  attempt_count,
+                  0
+                ) < ?
+              ORDER BY
+                created_at ASC,
+                id ASC
               LIMIT 1
             )
             RETURNING *
@@ -754,7 +662,7 @@ export default async function handler(req, res) {
         });
 
       const task =
-        claimResult?.rows?.[0] ||
+        claimResult.rows?.[0] ||
         null;
 
       // ------------------------------------------------------
@@ -787,12 +695,9 @@ export default async function handler(req, res) {
         'info',
         'Task claimed',
         {
-          taskId:
-            task.id,
-
+          taskId: task.id,
           attempt:
             attemptsUsed,
-
           workerId
         }
       );
@@ -831,9 +736,7 @@ export default async function handler(req, res) {
             'warn',
             'Evidence retrieval failed',
             {
-              taskId:
-                task.id,
-
+              taskId: task.id,
               error:
                 safeErrorMessage(error)
             }
@@ -920,12 +823,9 @@ export default async function handler(req, res) {
           'warn',
           'Task scheduled for retry',
           {
-            taskId:
-              task.id,
-
+            taskId: task.id,
             attempt:
               attemptsUsed,
-
             retryAfter:
               delaySeconds
           }
@@ -933,32 +833,25 @@ export default async function handler(req, res) {
 
         return res.status(200).json({
           status: 'SUCCESS',
-
           taskId:
             task.id,
-
           taskStatus:
             'pending',
-
           message:
-            'Task failed, will retry later.',
-
+            'Task failed and will retry later.',
           summary: {
             generated: 0,
-
             inserted: 0,
-
             rejected:
               result?.rejectedTotal ||
               0
           },
-
           requestId
         });
       }
 
       // ------------------------------------------------------
-      // Final task status
+      // Finalize task
       // ------------------------------------------------------
 
       const newStatus =
@@ -986,19 +879,14 @@ export default async function handler(req, res) {
           `,
           args: [
             newStatus,
-
             success
               ? now
               : null,
-
             !success
               ? now
               : null,
-
             finalError,
-
             task.id,
-
             workerId
           ]
         });
@@ -1008,7 +896,7 @@ export default async function handler(req, res) {
       // ------------------------------------------------------
 
       if (
-        !updateResult?.rows ||
+        !updateResult.rows ||
         updateResult.rows.length === 0
       ) {
         log(
@@ -1025,7 +913,7 @@ export default async function handler(req, res) {
           error:
             'TASK_OWNERSHIP_LOST',
           message:
-            'Task reclaimed by another worker.',
+            'Task was reclaimed by another worker.',
           requestId
         });
       }
@@ -1036,7 +924,6 @@ export default async function handler(req, res) {
         {
           taskId:
             task.id,
-
           status:
             newStatus
         }
@@ -1058,25 +945,28 @@ export default async function handler(req, res) {
 
         summary: {
           generated:
-            result?.count || 0,
+            result?.count ||
+            0,
 
           inserted:
-            result?.count || 0,
+            result?.count ||
+            0,
 
           rejected:
-            result?.rejectedTotal || 0,
+            result?.rejectedTotal ||
+            0,
 
           duplicates:
-            result?.duplicates || 0
+            result?.duplicates ||
+            0
         },
 
         requestId
       });
 
     } catch (error) {
-
       // ------------------------------------------------------
-      // Main exception
+      // Task processing exception
       // ------------------------------------------------------
 
       const dbError =
@@ -1096,7 +986,10 @@ export default async function handler(req, res) {
           workerId,
 
           error:
-            errorMessage
+            errorMessage,
+
+          errorCode:
+            dbError.code
         }
       );
 
@@ -1119,7 +1012,6 @@ export default async function handler(req, res) {
             MAX_RETRY_ATTEMPTS;
 
           if (canRetry) {
-
             const delay =
               getRetryDelaySeconds(
                 attemptsUsed
@@ -1153,7 +1045,6 @@ export default async function handler(req, res) {
             });
 
           } else {
-
             await db.execute({
               sql: `
                 UPDATE generation_tasks
@@ -1178,10 +1069,9 @@ export default async function handler(req, res) {
           }
 
         } catch (recoveryError) {
-
           log(
             'error',
-            'Recovery failed',
+            'Task recovery failed',
             {
               taskId:
                 claimedTask.id,
@@ -1194,10 +1084,6 @@ export default async function handler(req, res) {
           );
         }
       }
-
-      // ------------------------------------------------------
-      // Safe diagnostics
-      // ------------------------------------------------------
 
       const diagnostics =
         getDbDiagnostics();
@@ -1229,28 +1115,23 @@ export default async function handler(req, res) {
 
           databaseConfig: {
             urlConfigured:
-              diagnostics?.urlConfigured ??
-              false,
+              diagnostics.urlConfigured,
 
             tokenConfigured:
-              diagnostics?.tokenConfigured ??
-              false,
+              diagnostics.tokenConfigured,
 
             urlProtocol:
-              diagnostics?.urlProtocol ??
+              diagnostics.urlProtocol ||
               null,
 
             urlHost:
-              diagnostics?.urlHost ??
+              diagnostics.urlHost ||
               null,
 
             tokenLength:
-              diagnostics?.tokenLength ??
+              diagnostics.tokenLength ||
               null
-          },
-
-          hint:
-            'Exact non-secret database error is returned above. No Turso token is exposed.'
+          }
         },
 
         requestId
